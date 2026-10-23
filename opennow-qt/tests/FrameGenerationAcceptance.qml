@@ -16,10 +16,24 @@ QtObject {
         return null
     }
     function run(parent) {
-        ShellStore.settings = Object.assign({}, ShellStore.settings, {fps: 60, frameGeneration: "off"})
+        // Levels stay locked until the capability test has allowed them for the current
+        // preset (resolution, frame rate, GPU, engine).
+        ShellStore.settings = Object.assign({}, ShellStore.settings,
+            {fps: 60, resolution: "1920x1080", frameGeneration: "off", frameGenerationTargetFps: 0, frameGenerationProfiles: {}})
         const two = find(parent, "settingsOption-2x")
-        check(two && two.enabled, "2x setting is selectable")
-        check(!find(parent, "settingsOption-3x"), "no 3x option")
+        const three = find(parent, "settingsOption-3x")
+        const four = find(parent, "settingsOption-4x")
+        check(two && three && four, "2x, 3x and 4x levels exist")
+        check(!two.enabled && !three.enabled && !four.enabled, "levels are locked before a capability test")
+        ShellStore.ensureFrameGenerationGpu()
+        const profiles = {}
+        profiles[ShellStore.settingsOwnerState.frameGenerationProfileKey()] = {
+            engine: "motion", gpu: ShellStore.settingsOwnerState.frameGenerationGpu, width: 1920, height: 1080,
+            fps: 60, refreshHz: 240, p50Ms: 1.5, p95Ms: 2.1, maxMs: 3, frames: 180, gpuTimed: true,
+            allowed: [2, 3], testedAt: "acceptance", version: 1}
+        ShellStore.settings = Object.assign({}, ShellStore.settings, {frameGenerationProfiles: profiles})
+        check(two.enabled && three.enabled, "a passing profile unlocks the allowed levels")
+        check(!four.enabled, "levels the profile rules out stay locked")
         const desktop = desktopStream.createObject(parent)
         const console = consoleStream.createObject(parent)
         const surfaces = [find(desktop, "streamSurfaceHost"), find(console, "streamSurfaceHost")]
@@ -45,7 +59,7 @@ QtObject {
             "fallback is reflected in the output measurement")
         ShellStore.streamer = {status: "streaming", framesPerSecond: 120}
         stats.frameGenerationStats = {status: "source-rate-limit", outputFps: 120}
-        check(stats.frameGenerationState() === qsTr("120 FPS generation limit"),
+        check(stats.frameGenerationState() === qsTr("Source rate too high"),
             "the source-rate limit has an explicit status")
         check(stats.cards.find(card => card.field === "framesPerSecond").value === 120
             && stats.cards.find(card => card.field === "frameGenerationOutputFps").value === 120,

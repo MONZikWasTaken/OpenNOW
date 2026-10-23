@@ -214,8 +214,9 @@ bool StreamFrameInterpolator::initialize(QRhi *rhi)
     return true;
 }
 
-bool StreamFrameInterpolator::ingest(QRhiCommandBuffer *cb, QRhiTexture *source)
+bool StreamFrameInterpolator::ingest(QRhiCommandBuffer *cb, QRhiTexture *source, int factor)
 {
+    Q_UNUSED(factor); // block-matching synthesis produces the midpoint only
     if (!m_state || !cb || !source) {
         reset();
         return false;
@@ -272,6 +273,16 @@ QRhiTexture *StreamFrameInterpolator::currentTexture() const
 QRhiTexture *StreamFrameInterpolator::midpointTexture() const
 {
     return hasPair() ? m_state->midpoint.texture.get() : nullptr;
+}
+
+int StreamFrameInterpolator::generatedCount() const
+{
+    return hasPair() ? 1 : 0;
+}
+
+QRhiTexture *StreamFrameInterpolator::generatedTexture(int index) const
+{
+    return index == 1 ? midpointTexture() : nullptr;
 }
 
 bool StreamFrameInterpolator::hasPair() const

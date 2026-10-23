@@ -2,6 +2,7 @@
 
 #include <QTest>
 #include <limits>
+#include <tuple>
 
 class FramePacerTest : public QObject
 {
@@ -63,8 +64,10 @@ private slots:
         QCOMPARE(pacer.source(130, 129 * 16'666'667ULL, 129 * 16'666'667LL, 120), Result::Interpolate);
     }
 
-    void doesNotGenerateAboveThe120FpsTarget()
+    void generatesAboveSixtyFpsWhenTheDisplayAllows()
     {
+        // 120 -> 240 on a 360 Hz display is a valid target; the capability test, not a
+        // fixed source-rate ceiling, decides whether the GPU can afford it.
         for (const auto interval : {8'333'333ULL, 11'111'111ULL, 13'333'333ULL}) {
             for (const bool timestamps : {false, true}) {
                 StreamFramePacer pacer;
@@ -72,15 +75,93 @@ private slots:
                 for (std::uint64_t frame = 2; frame <= 20; ++frame) {
                     QCOMPARE(pacer.source(frame, timestamps ? (frame - 1) * interval : 0,
                                           (frame - 1) * interval, 360),
-                             StreamFramePacer::Result::SourceRateLimit);
-                    QVERIFY(!pacer.pending());
+                             StreamFramePacer::Result::Interpolate);
                 }
                 pacer.reset();
-                pacer.source(1, 0, 0, 360);
-                QCOMPARE(pacer.source(2, 16'666'667, 16'666'667, 360),
-                         StreamFramePacer::Result::Interpolate);
+                pacer.source(1, 0, 0, 165);
+                // 120 FPS needs 234 Hz for 2x: a 165 Hz display is too slow.
+                QCOMPARE(pacer.source(2, 8'333'333, 8'333'333, 165),
+                         StreamFramePacer::Result::DisplayTooSlow);
             }
         }
+    }
+
+    void refusesSourcesFasterThanTheSlotWidth()
+    {
+        StreamFramePacer pacer;
+        pacer.source(1, 0, 0, 1000);
+        for (std::uint64_t frame = 2; frame <= 20; ++frame) {
+            QCOMPARE(pacer.source(frame, (frame - 1) * 3'000'000, (frame - 1) * 3'000'000, 1000),
+                     StreamFramePacer::Result::SourceRateLimit);
+            QVERIFY(!pacer.pending());
+        }
+    }
+
+    void displayRequirementScalesWithTheFactor()
+    {
+        using Result = StreamFramePacer::Result;
+        // 60 FPS source: 2x needs ~117 Hz, 3x ~177 Hz, 4x ~237 Hz.
+        for (const auto [factor, refresh, expected] : {
+                 std::tuple{2, 120.0, Result::Interpolate}, std::tuple{3, 120.0, Result::DisplayTooSlow},
+                 std::tuple{3, 180.0, Result::Interpolate}, std::tuple{4, 180.0, Result::DisplayTooSlow},
+                 std::tuple{4, 240.0, Result::Interpolate}, std::tuple{4, 239.0, Result::Interpolate}}) {
+            StreamFramePacer pacer;
+            pacer.source(1, 0, 0, refresh, factor);
+            QCOMPARE(pacer.source(2, 16'666'667, 16'666'667, refresh, factor), expected);
+            QCOMPARE(pacer.factor(), factor);
+        }
+    }
+
+    void schedulesEverySlotOfAThreeAndFourTimesPair()
+    {
+        using Kind = StreamFramePacer::Next::Kind;
+        // A 1000 Hz display keeps the 1.5-refresh lead (1.5 ms) shorter than every slot
+        // (5.6 ms at 3x, 4.2 ms at 4x), so slots can be observed one at a time.
+        constexpr double refresh = 1000.0;
+        for (const int factor : {3, 4}) {
+            StreamFramePacer pacer;
+            pacer.source(1, 0, 0, refresh, factor);
+            QCOMPARE(pacer.source(2, 16'666'667, 16'666'667, refresh, factor),
+                     StreamFramePacer::Result::Interpolate);
+            pacer.generated(16'666'667, factor - 1);
+            QVERIFY(pacer.pending());
+            QCOMPARE(pacer.pendingCount(), factor - 1);
+            const auto slot = 16'666'667 / factor;
+            // Nothing is due before its slot minus the lead.
+            QCOMPARE(pacer.takeNext(16'666'667, refresh).kind, Kind::None);
+            for (int index = 2; index <= factor - 1; ++index) {
+                const auto next = pacer.takeNext(16'666'667 + (index - 1) * slot, refresh);
+                QCOMPARE(next.kind, Kind::Generated);
+                QCOMPARE(next.index, index);
+                QVERIFY(pacer.pending());
+            }
+            const auto original = pacer.takeNext(16'666'667 + (factor - 1) * slot, refresh);
+            QCOMPARE(original.kind, Kind::Original);
+            QVERIFY(!pacer.pending());
+            QCOMPARE(pacer.takeNext(40'000'000, refresh).kind, Kind::None);
+            // A fresh pair drains in the same order again.
+            QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, refresh, factor),
+                     StreamFramePacer::Result::Interpolate);
+        }
+        // With a slower display the lead can cover a whole slot: the next generated frame
+        // is then due immediately, which the presenter gates on the previous swap instead.
+        StreamFramePacer fast;
+        fast.source(1, 0, 0, 360, 4);
+        fast.source(2, 16'666'667, 16'666'667, 360, 4);
+        fast.generated(16'666'667, 3);
+        QCOMPARE(fast.takeNext(16'666'667, 360).kind, Kind::Generated);
+    }
+
+    void undrainedGeneratedFramesStillTriggerTheOverloadCooldown()
+    {
+        StreamFramePacer pacer;
+        pacer.source(1, 0, 0, 360, 4);
+        pacer.source(2, 16'666'667, 16'666'667, 360, 4);
+        pacer.generated(16'666'667, 3);
+        QCOMPARE(pacer.takeNext(16'666'667 + 4'166'666, 360).kind, StreamFramePacer::Next::Kind::Generated);
+        QVERIFY(pacer.pending());
+        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 360, 4), StreamFramePacer::Result::Overloaded);
+        QVERIFY(!pacer.pending());
     }
 
     void highRefreshDoesNotCompressTheOriginalPair()

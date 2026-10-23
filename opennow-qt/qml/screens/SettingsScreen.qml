@@ -218,7 +218,8 @@ FocusScope {
             const codecDisabled = ShellStore.codecsDisabledByProfile()
             const capsDisabled = codecValues.filter(value => value !== "auto" && !ShellStore.codecAvailable(value))
             const disabledCodecs = codecDisabled.concat(capsDisabled.filter(value => codecDisabled.indexOf(value) < 0))
-            const frameGeneration = String(settings.frameGeneration || "off") === "2x"
+            const frameGenerationTargets = ShellStore.frameGenerationTargetOptions()
+            const frameGenerationDisplayChoices = [0].concat(ShellStore.frameGenerationDisplayChoices())
             const hdrAvailable = HdrOutput.supported && ShellStore.hdrDecoderAvailable()
             const hdrTierOk = ShellStore.tenBitAllowedByMembership()
             const hdrDescription = !hdrTierOk ? qsTr("HDR10 requires a Performance or Ultimate membership.")
@@ -231,7 +232,11 @@ FocusScope {
                 {t:qsTr("HDR"), d:hdrDescription, v:Boolean(settings.enableHdr) ? qsTr("On") : qsTr("Off"), key:"enableHdr", values:[false,true], labels:[qsTr("Off"),qsTr("On")], control:"segments", selectedIndex:Boolean(settings.enableHdr) ? 1 : 0, disabledValues:(hdrAvailable && hdrTierOk) ? [] : [true]},
                 {t:"Max bitrate", d:"Maximum requested stream bitrate", v:Number(settings.maxBitrateMbps || 75) + " Mbps", key:"maxBitrateMbps", values:[0.22,1,5,10,25,50,75,100,150,200], labels:["0.22 Mbps","1 Mbps","5 Mbps","10 Mbps","25 Mbps","50 Mbps","75 Mbps","100 Mbps","150 Mbps","200 Mbps"], control:"slider", sliderPercent:Number(settings.maxBitrateMbps || 75) / 200},
                 toggle(qsTr("Save bandwidth"), qsTr("Lets the server trade resolution and image quality for a steadier frame rate when your connection cannot sustain the selected profile. Off requests no dynamic adjustment. Applies to new sessions."), "saveBandwidth"),
-                {t:qsTr("Frame generation (Experimental)"), d:qsTr("Targets 120 displayed FPS from a 60 FPS stream. Requires a fast GPU and 120 Hz display; adds latency and artifacts."), v:frameGeneration ? qsTr("2×") : qsTr("Off"), key:"frameGeneration", values:["off","2x"], labels:[qsTr("Off"),qsTr("2×")], control:"segments", selectedIndex:frameGeneration ? 1 : 0},
+                {t:qsTr("Frame generation (Experimental)"), d:ShellStore.frameGenerationDescription(), v:ShellStore.frameGenerationFactor() >= 2 ? ShellStore.frameGenerationFactor() + "×" : qsTr("Off"), key:"frameGeneration", values:["off","2x","3x","4x"], labels:[qsTr("Off"),qsTr("2×"),qsTr("3×"),qsTr("4×")], control:"segments", selectedIndex:Math.max(0, ["off","2x","3x","4x"].indexOf(String(settings.frameGeneration || "off"))), disabledValues:ShellStore.frameGenerationLockedValues()},
+                {t:qsTr("Test frame generation"), d:qsTr("Measures this GPU at the selected resolution and frame rate and unlocks the levels it can sustain."), v:FrameGenerationBenchmark.running ? qsTr("Testing…") : qsTr("Run test"), action:"frame-generation-test"},
+                {t:qsTr("Framegen on GitHub"), d:qsTr("FG-Legacy is the Framegen v7 model. Runtime MIT; weights for personal use only."), v:"↗", action:"framegen-github"},
+                {t:qsTr("Target FPS"), d:ShellStore.frameGenerationOutputDescription(), v:Number(settings.frameGenerationTargetFps || 0) > 0 ? String(settings.frameGenerationTargetFps) : qsTr("Level"), key:"frameGenerationTargetFps", values:frameGenerationTargets.map(option => option.value), labels:frameGenerationTargets.map(option => option.label), control:"segments", selectedIndex:Math.max(0, frameGenerationTargets.findIndex(option => option.value === Number(settings.frameGenerationTargetFps || 0))), disabledValues:frameGenerationTargets.filter(option => !option.enabled).map(option => option.value)},
+                {t:qsTr("Display refresh"), d:ShellStore.frameGenerationDisplayDescription(), v:Number(settings.frameGenerationDisplayHz || 0) > 0 ? String(settings.frameGenerationDisplayHz) + " Hz" : qsTr("Auto"), key:"frameGenerationDisplayHz", values:frameGenerationDisplayChoices, labels:frameGenerationDisplayChoices.map(hz => hz === 0 ? qsTr("Auto") : String(hz)), control:"segments", selectedIndex:Math.max(0, frameGenerationDisplayChoices.indexOf(Number(settings.frameGenerationDisplayHz || 0)))},
                 choice(qsTr("Upscaling"), Qt.platform.os === "osx"
                     ? qsTr("Spatial upscaling for enlarged video. Uses extra GPU time; falls back to normal scaling when MetalFX is unavailable.")
                     : qsTr("FSR 1 upscales enlarged SDR video on the GPU. Uses extra GPU time; HDR and unavailable effects use normal scaling."),
@@ -459,6 +464,12 @@ FocusScope {
     function applyChoice(key, value) {
         if (key === "controllerInputSource")
             ControllerInput.inputControllerId = Number(value)
+        else if (key === "frameGeneration")
+            ShellStore.selectFrameGenerationLevel(value)
+        else if (key === "frameGenerationTargetFps")
+            ShellStore.selectFrameGenerationTarget(value)
+        else if (key === "frameGenerationDisplayHz")
+            ShellStore.selectFrameGenerationDisplayHz(value)
         else
             ShellStore.setSetting(key, value)
         if (key === "resolution")
@@ -587,6 +598,10 @@ FocusScope {
                 AppController.openLocalPath(ShellStore.mediaRootPath + "/Recordings", false)
             else
                 ShellStore.refreshMedia()
+        } else if (row.action === "frame-generation-test") {
+            ShellStore.runFrameGenerationTest()
+        } else if (row.action === "framegen-github") {
+            AppController.openExternalUrl("https://github.com/MONZikWasTaken/Framegen")
         } else if (row.action === "refresh-regions") {
             ShellStore.refreshRegions()
         } else if (row.action === "refresh-streamer-capabilities") {

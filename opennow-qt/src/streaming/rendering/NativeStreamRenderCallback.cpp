@@ -227,7 +227,7 @@ public:
             return;
         }
         if (status == OPENNOW_STREAMER_NO_FRAME || status == OPENNOW_STREAMER_STALE_FRAME) {
-            prepareOriginal();
+            prepareNext();
             return;
         }
         if (status == OPENNOW_STREAMER_GRAPHICS_UNSUPPORTED) {
@@ -284,7 +284,7 @@ public:
                   m_reportedOutputBits, m_reportedOutputBits == 8 ? "ordered-8x8" : "none");
         }
         auto *source = m_textures.importedTexture();
-        if (m_frameGeneration && (m_historySize != source->pixelSize()
+        if ((m_frameGenerationFactor >= 2) && (m_historySize != source->pixelSize()
                                   || m_historyFormat != source->format())) {
             resetFrameGeneration();
             m_historySize = source->pixelSize();
@@ -293,21 +293,22 @@ public:
         m_outputDirty = true;
         m_outputKind = 1;
         if (m_sourceColorSpace != OPENNOW_STREAMER_COLOR_SPACE_SDR709) {
-            m_frameGenerationStatus.store(m_frameGeneration ? FrameGenerationState::HdrUnsupported : FrameGenerationState::Off);
+            m_frameGenerationStatus.store(m_frameGenerationFactor >= 2 ? FrameGenerationState::HdrUnsupported : FrameGenerationState::Off);
             return;
         }
-        if (!m_frameGeneration || m_frameGenerationFailed) return;
+        if (m_frameGenerationFactor < 2 || m_frameGenerationFailed) return;
 
         const auto now = clockNs();
-        const auto decision = m_pacer.source(info.sequence, info.presentation_time_ns, now, m_refreshRate);
+        const auto decision = m_pacer.source(info.sequence, info.presentation_time_ns, now,
+                                             m_refreshRate, m_frameGenerationFactor);
         updateTimingStats();
         if (decision == StreamFramePacer::Result::Duplicate) {
             m_outputDirty = false;
             if (m_pacer.pending())
-                m_textures.selectTexture(m_interpolator.midpointTexture());
+                m_textures.selectTexture(m_interpolator.generatedTexture(m_pacer.pendingIndex()));
             else if (m_interpolator.hasPair())
                 m_textures.selectTexture(m_interpolator.currentTexture());
-            prepareOriginal();
+            prepareNext();
             return;
         }
         m_needsFrame.store(false);
@@ -321,7 +322,8 @@ public:
             default: m_frameGenerationStatus.store(FrameGenerationState::WarmingUp); break;
             }
         }
-        if (!m_interpolator.initialize(m_rhi) || !m_interpolator.ingest(commandBuffer, source)) {
+        if (!m_interpolator.initialize(m_rhi)
+            || !m_interpolator.ingest(commandBuffer, source, m_frameGenerationFactor)) {
             disableFrameGeneration();
             return;
         }
@@ -330,12 +332,16 @@ public:
                 m_frameGenerationStatus.store(FrameGenerationState::WarmingUp);
             return;
         }
-        if (!m_textures.selectTexture(m_interpolator.midpointTexture())) {
+        // The engine may synthesise fewer frames than requested (the block-matching
+        // engine knows only the midpoint); the schedule follows what exists.
+        const int generated = std::min(m_interpolator.generatedCount(), m_frameGenerationFactor - 1);
+        m_effectiveFactor.store(generated + 1);
+        if (generated < 1 || !m_textures.selectTexture(m_interpolator.generatedTexture(1))) {
             disableFrameGeneration();
             return;
         }
         m_midpointSwapped.store(false);
-        m_pacer.midpoint(clockNs());
+        m_pacer.generated(clockNs(), generated);
         m_needsFrame.store(true);
         m_outputKind = 2;
         m_frameGenerationStatus.store(FrameGenerationState::Active);
@@ -366,11 +372,14 @@ public:
             m_resetFrameGeneration = true;
     }
 
-    void setFrameGeneration(bool enabled, double refreshRate) override
+    void setFrameGeneration(int factor, double refreshRate) override
     {
-        if (m_frameGeneration != enabled || m_refreshRate != refreshRate)
+        factor = factor >= StreamFramePacer::MinimumFactor
+            ? std::min(factor, StreamFramePacer::MaximumFactor) : 0;
+        if (m_frameGenerationFactor != factor || m_refreshRate != refreshRate)
             m_resetFrameGeneration = true;
-        m_frameGeneration = enabled;
+        m_frameGenerationFactor = factor;
+        m_reportedFactor.store(factor);
         m_refreshRate = refreshRate;
         m_reportedRefreshRate.store(refreshRate);
     }
@@ -443,6 +452,8 @@ public:
                 {QStringLiteral("arrivalDeltaMs"), double(m_arrivalDelta.load()) / 1.0e6},
                 {QStringLiteral("sequenceDelta"), qulonglong(m_sequenceDelta.load())},
                 {QStringLiteral("refreshRateHz"), m_reportedRefreshRate.load()},
+                {QStringLiteral("factor"), m_reportedFactor.load()},
+                {QStringLiteral("effectiveFactor"), m_effectiveFactor.load()},
                 {QStringLiteral("outputFps"), clockNs() - m_sampleStart.load() < 2'000'000'000
                     ? m_outputFps.load() : 0.0}};
     }
@@ -551,7 +562,9 @@ private:
     QSize m_historySize;
     QRhiTexture::Format m_historyFormat = QRhiTexture::UnknownFormat;
     double m_refreshRate = 0;
-    bool m_frameGeneration = false;
+    int m_frameGenerationFactor = 0;
+    std::atomic_int m_reportedFactor = 0;
+    std::atomic_int m_effectiveFactor = 0;
     QSize m_upscalingTarget;
     bool m_fsrUpscaling = false;
     int m_upscalingSharpness = 10;
@@ -606,7 +619,8 @@ private:
         m_midpointSwapped.store(false);
         m_outputDirty = false;
         m_frameGenerationFailed = false;
-        m_frameGenerationStatus.store(m_frameGeneration ? FrameGenerationState::WarmingUp : FrameGenerationState::Off);
+        m_effectiveFactor.store(0);
+        m_frameGenerationStatus.store(m_frameGenerationFactor >= 2 ? FrameGenerationState::WarmingUp : FrameGenerationState::Off);
     }
 
     void disableFrameGeneration()
@@ -620,10 +634,25 @@ private:
         m_frameGenerationStatus.store(FrameGenerationState::Unavailable);
     }
 
-    void prepareOriginal()
+    // Advances the pair's presentation schedule: the next generated frame when its slot
+    // arrives, then the original. Only moves on once the previously selected generated
+    // frame has actually reached the display.
+    void prepareNext()
     {
-        if (!m_frameGeneration || !m_midpointSwapped.load()
-            || !m_pacer.takeOriginal(clockNs(), m_refreshRate)) return;
+        if (m_frameGenerationFactor < 2 || !m_midpointSwapped.load()) return;
+        const auto next = m_pacer.takeNext(clockNs(), m_refreshRate);
+        if (next.kind == StreamFramePacer::Next::Kind::None) return;
+        if (next.kind == StreamFramePacer::Next::Kind::Generated) {
+            if (!m_textures.selectTexture(m_interpolator.generatedTexture(next.index))) {
+                disableFrameGeneration();
+                return;
+            }
+            m_midpointSwapped.store(false);
+            m_needsFrame.store(true);
+            m_outputDirty = true;
+            m_outputKind = 2;
+            return;
+        }
         m_needsFrame.store(false);
         if (!m_textures.selectTexture(m_interpolator.currentTexture())) {
             disableFrameGeneration();

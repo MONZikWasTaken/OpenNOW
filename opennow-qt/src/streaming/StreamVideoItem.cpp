@@ -256,14 +256,39 @@ void StreamVideoItem::setRenderCallback(std::shared_ptr<StreamVideoRenderCallbac
 
 bool StreamVideoItem::frameGeneration() const
 {
-    return m_frameGeneration;
+    return m_frameGenerationFactor >= 2;
 }
 
 void StreamVideoItem::setFrameGeneration(bool enabled)
 {
-    if (m_frameGeneration == enabled) return;
-    m_frameGeneration = enabled;
-    if (enabled) m_frameStatsTimer.start();
+    setFrameGenerationFactor(enabled ? 2 : 0);
+}
+
+int StreamVideoItem::frameGenerationFactor() const
+{
+    return m_frameGenerationFactor;
+}
+
+int StreamVideoItem::displayRefreshOverrideHz() const
+{
+    return m_displayRefreshOverrideHz;
+}
+
+void StreamVideoItem::setDisplayRefreshOverrideHz(int hz)
+{
+    hz = std::clamp(hz, 0, 1000);
+    if (m_displayRefreshOverrideHz == hz) return;
+    m_displayRefreshOverrideHz = hz;
+    emit displayRefreshOverrideHzChanged();
+    update();
+}
+
+void StreamVideoItem::setFrameGenerationFactor(int factor)
+{
+    factor = factor >= 2 ? std::min(factor, 4) : 0;
+    if (m_frameGenerationFactor == factor) return;
+    m_frameGenerationFactor = factor;
+    if (factor) m_frameStatsTimer.start();
     else m_frameStatsTimer.stop();
     emit frameGenerationChanged();
     emit frameGenerationStatsChanged();
@@ -385,7 +410,7 @@ void StreamVideoItem::connectFrameSwaps()
         if (auto renderer = callback.lock()) renderer->frameSwapped();
     }, Qt::DirectConnection);
     m_frameUpdateConnection = connect(window(), &QQuickWindow::frameSwapped, this, [this] {
-        if (m_frameGeneration && isVisible() && m_renderCallback && m_renderCallback->needsFrame())
+        if ((m_frameGenerationFactor >= 2) && isVisible() && m_renderCallback && m_renderCallback->needsFrame())
             update();
     }, Qt::QueuedConnection);
 }

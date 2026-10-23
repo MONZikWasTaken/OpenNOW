@@ -1209,6 +1209,24 @@ QtObject {
         return Boolean(game && game.requiresPaidMembership === true) && settingsOwner.membershipTierName() === "FREE"
     }
 
+    // Frame generation facade: levels, target FPS, display refresh and the capability test
+    // are owned by SettingsState.
+    function frameGenerationFactor() { return settingsOwner.frameGenerationFactor() }
+    function frameGenerationSourceFps() { return settingsOwner.frameGenerationSourceFps() }
+    function frameGenerationDisplayHz() { return settingsOwner.frameGenerationDisplayHz() }
+    function frameGenerationDescription() { return settingsOwner.frameGenerationDescription() }
+    function frameGenerationOutputDescription() { return settingsOwner.frameGenerationOutputDescription() }
+    function frameGenerationDisplayDescription() { return settingsOwner.frameGenerationDisplayDescription() }
+    function frameGenerationLockedValues() { return settingsOwner.frameGenerationLockedValues() }
+    function frameGenerationLockedHint() { return settingsOwner.frameGenerationLockedHint() }
+    function frameGenerationTargetOptions() { return settingsOwner.frameGenerationTargetOptions() }
+    function frameGenerationDisplayChoices() { return settingsOwner.frameGenerationDisplayChoices }
+    function selectFrameGenerationLevel(value) { settingsOwner.selectFrameGenerationLevel(value) }
+    function selectFrameGenerationTarget(value) { settingsOwner.selectFrameGenerationTarget(value) }
+    function selectFrameGenerationDisplayHz(value) { settingsOwner.selectFrameGenerationDisplayHz(value) }
+    function runFrameGenerationTest() { settingsOwner.runFrameGenerationTest() }
+    function ensureFrameGenerationGpu() { settingsOwner.ensureFrameGenerationGpu() }
+
     function canonicalFpsValues() {
         return settingsOwner.canonicalFpsValues()
     }

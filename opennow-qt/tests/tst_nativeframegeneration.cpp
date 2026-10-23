@@ -460,7 +460,7 @@ private slots:
         QVERIFY(target->create());
         auto callback = createNativeStreamRenderCallback(&runtime);
         const auto release = qScopeGuard([&] { callback->releaseResources(); });
-        callback->setFrameGeneration(true, 165.0);
+        callback->setFrameGeneration(2, 165.0);
         QMatrix4x4 matrix = m_rhi->clipSpaceCorrMatrix();
         matrix.ortho(0, size.width(), size.height(), 0, -1, 1);
         const QRectF bounds(QPointF(0, 0), QSizeF(size));
@@ -608,7 +608,7 @@ private slots:
         QVERIFY(target->create());
         auto callback = createNativeStreamRenderCallback(&runtime);
         const auto release = qScopeGuard([&] { callback->releaseResources(); });
-        callback->setFrameGeneration(enabled, 165.0);
+        callback->setFrameGeneration(enabled ? 2 : 0, 165.0);
         QMatrix4x4 matrix = m_rhi->clipSpaceCorrMatrix();
         matrix.ortho(0, size.width(), size.height(), 0, -1, 1);
         const QRectF bounds(QPointF(0, 0), QSizeF(size));
