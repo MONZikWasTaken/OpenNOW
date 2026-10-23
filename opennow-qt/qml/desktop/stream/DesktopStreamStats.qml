@@ -95,7 +95,7 @@ Item {
         case "display-refresh": return qsTr("Display refresh")
         case "source-rate-limit": return qsTr("Source rate too high")
         case "hdr-unavailable": return qsTr("Unavailable with HDR")
-        case "overloaded": return qsTr("Overloaded") + " · " + qsTr("source frames keep arriving in bursts")
+        case "overloaded": return qsTr("Paused") + " · " + qsTr("the display stopped taking frames")
         case "discontinuity": return qsTr("Discontinuity") + frameGenerationReasonSuffix()
         default: return qsTr("Unavailable")
         }
