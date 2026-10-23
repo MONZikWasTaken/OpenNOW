@@ -185,7 +185,11 @@ effective factor. The block-matching engine computes the pair's flow once and ru
 synthesis pass once per generated frame at `t = k / N` (previous frame warped by `t` of
 the forward flow, current frame by `1 − t` of the backward flow, blended `1 − t : t`), so
 2×, 3× and 4× all work; each generated frame has its own render target and uniform buffer
-so the passes of one pair never clobber each other's `t`.
+so the passes of one pair never clobber each other's `t`. The presenter
+(`StreamVideoTextureRenderer`) keeps five external texture slots, the two history frames
+plus up to three generated frames of a pair; with the earlier three slots a 3× or 4× pair
+ran out of slots on its second generated frame and generation switched itself off with
+`unavailable`.
 
 ### Capability test
 
