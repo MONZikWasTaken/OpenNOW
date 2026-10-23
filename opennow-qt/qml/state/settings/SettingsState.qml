@@ -610,48 +610,90 @@ QtObject {
         })
         return options
     }
+    // Frame generation choices persist through the core like every other setting; fixtures
+    // that run without a core keep the local map so the UI still follows the choice.
+    function writeFrameGenerationSetting(key, value) {
+        if (ready) setSetting(key, value)
+        else applySetting(key, value)
+    }
     // Keeps the stored level in step with the mode's factor so overlays and older readers agree.
     function storeFrameGenerationLevel(factor) {
-        applySetting("frameGeneration", factor >= 2 ? frameGenerationLevels[Math.min(4, factor) - 2] : "off")
+        writeFrameGenerationSetting("frameGeneration", factor >= 2 ? frameGenerationLevels[Math.min(4, factor) - 2] : "off")
     }
     function selectFrameGenerationMode(mode) {
         mode = frameGenerationModes.indexOf(String(mode)) >= 0 ? String(mode) : "off"
         if (mode === "off") {
-            applySetting("frameGeneration", "off")
-            applySetting("frameGenerationMode", "off")
+            writeFrameGenerationSetting("frameGeneration", "off")
+            writeFrameGenerationSetting("frameGenerationMode", "off")
             return
         }
         if (mode === "multiplier") {
             if (frameGenerationLevelFactor(settings.frameGeneration) === 0) {
                 const first = frameGenerationLevels.find(value => frameGenerationAllowed(frameGenerationLevelFactor(value)))
-                if (first) applySetting("frameGeneration", first)
+                if (first) writeFrameGenerationSetting("frameGeneration", first)
             }
         } else if (mode === "target") {
             const options = frameGenerationTargetOptions().filter(option => option.enabled)
             let target = frameGenerationTargetFps()
             if (!options.some(option => option.value === target)) {
                 target = options.length ? options[0].value : 0
-                applySetting("frameGenerationTargetFps", target)
+                writeFrameGenerationSetting("frameGenerationTargetFps", target)
             }
             storeFrameGenerationLevel(frameGenerationTargetFactor(target))
         } else {
             storeFrameGenerationLevel(frameGenerationDisplayFactor())
         }
-        applySetting("frameGenerationMode", mode)
+        writeFrameGenerationSetting("frameGenerationMode", mode)
     }
     function selectFrameGenerationLevel(value) {
         const known = frameGenerationLevels.indexOf(String(value)) >= 0
-        applySetting("frameGeneration", known ? String(value) : "off")
-        applySetting("frameGenerationMode", known ? "multiplier" : "off")
+        writeFrameGenerationSetting("frameGeneration", known ? String(value) : "off")
+        writeFrameGenerationSetting("frameGenerationMode", known ? "multiplier" : "off")
     }
     function selectFrameGenerationTarget(value) {
         const target = Number(value) > 0 ? Number(value) : 0
-        applySetting("frameGenerationTargetFps", target)
+        writeFrameGenerationSetting("frameGenerationTargetFps", target)
         storeFrameGenerationLevel(frameGenerationTargetFactor(target))
-        applySetting("frameGenerationMode", target > 0 ? "target" : "off")
+        writeFrameGenerationSetting("frameGenerationMode", target > 0 ? "target" : "off")
     }
     function selectFrameGenerationDisplayHz(value) {
-        applySetting("frameGenerationDisplayHz", Number(value) > 0 ? Number(value) : 0)
+        writeFrameGenerationSetting("frameGenerationDisplayHz", Number(value) > 0 ? Number(value) : 0)
+    }
+    // In-stream quick toggle (Ctrl+G menu). Off keeps the configured mode, level and
+    // target in memory so On restores them; after a restart On takes the first level that fits.
+    property string frameGenerationResumeMode: ""
+    property string frameGenerationResumeLevel: ""
+    property int frameGenerationResumeTarget: 0
+    function toggleFrameGeneration() {
+        if (frameGenerationMode() !== "off") {
+            frameGenerationResumeMode = frameGenerationMode()
+            frameGenerationResumeLevel = String(settings.frameGeneration || "off")
+            frameGenerationResumeTarget = frameGenerationTargetFps()
+            selectFrameGenerationMode("off")
+            return
+        }
+        if (!frameGenerationUnlocked()) return
+        const mode = frameGenerationResumeMode || (frameGenerationResumeTarget > 0 ? "target" : "multiplier")
+        const level = frameGenerationLevelFactor(frameGenerationResumeLevel)
+        if (mode === "target" && frameGenerationResumeTarget > 0)
+            selectFrameGenerationTarget(frameGenerationResumeTarget)
+        else if (mode === "multiplier" && level >= 2 && frameGenerationAllowed(level))
+            selectFrameGenerationLevel(frameGenerationResumeLevel)
+        else
+            selectFrameGenerationMode(mode === "target" ? "multiplier" : mode)
+    }
+    // The in-stream tile only appears while frame generation is in use: on, or switched
+    // off from the stream in this session so it can be switched back on.
+    function frameGenerationQuickVisible() {
+        return frameGenerationUnlocked() && (frameGenerationMode() !== "off" || frameGenerationResumeMode !== "")
+    }
+    // One line for the in-stream menu tile.
+    function frameGenerationQuickText() {
+        if (!frameGenerationUnlocked()) return qsTr("Run the capability test in Settings first")
+        if (frameGenerationMode() === "off") return qsTr("Off")
+        const factor = frameGenerationFactor()
+        if (factor < 2) return qsTr("On · no level fits this frame rate")
+        return qsTr("%1× · %2 FPS").arg(factor).arg(frameGenerationSourceFps() * factor)
     }
     // Status of the capability test for the current preset (its own settings row).
     function frameGenerationTestDescription() {
@@ -752,11 +794,11 @@ QtObject {
                 gpuTimed: result.gpuTimed === true, engineMaxFactor: Number(result.engineMaxFactor || 2),
                 allowed: verdict.allowed, testedAt: result.testedAt, version: 1
             }
-            root.applySetting("frameGenerationProfiles", profiles)
+            root.writeFrameGenerationSetting("frameGenerationProfiles", profiles)
             const factor = root.frameGenerationFactor()
             if (factor >= 2 && verdict.allowed.indexOf(factor) < 0) {
-                root.applySetting("frameGenerationTargetFps", 0)
-                root.applySetting("frameGeneration", "off")
+                root.writeFrameGenerationSetting("frameGenerationTargetFps", 0)
+                root.writeFrameGenerationSetting("frameGeneration", "off")
             }
         }
     }

@@ -52,6 +52,20 @@ QtObject {
         check(ShellStore.settings.frameGeneration === "2x", "selection stores the exact 2x value")
         check(surfaces.every(surface => surface.frameGeneration), "both surfaces enable local generation")
         check(ShellStore.settings.fps === 60, "local generation does not raise the stream FPS")
+        // The in-stream toggle (Ctrl+G tile and shortcut) switches off and restores the choice.
+        check(ShellStore.frameGenerationQuickVisible(), "the stream menu tile shows while generation is on")
+        ShellStore.toggleFrameGeneration()
+        check(ShellStore.frameGenerationFactor() === 0 && surfaces.every(surface => !surface.frameGeneration),
+            "the toggle switches generation off at once")
+        check(ShellStore.frameGenerationQuickVisible(), "the tile stays so it can be switched back on")
+        ShellStore.toggleFrameGeneration()
+        check(ShellStore.settings.frameGeneration === "2x" && ShellStore.frameGenerationFactor() === 2,
+            "the toggle restores the 2x level")
+        ShellStore.applyStreamShortcutAction("toggle-frame-generation")
+        check(ShellStore.frameGenerationFactor() === 0 && ShellStore.streamControlMessage === qsTr("Frame generation off"),
+            "the shortcut switches generation off and reports it")
+        ShellStore.applyStreamShortcutAction("toggle-frame-generation")
+        check(ShellStore.frameGenerationFactor() === 2, "the shortcut restores generation")
         ShellStore.applySetting("frameGeneration", "off")
         check(surfaces.every(surface => !surface.frameGeneration), "both surfaces return to off")
         check(find(desktop, "streamSurfaceHost") === surfaces[0]

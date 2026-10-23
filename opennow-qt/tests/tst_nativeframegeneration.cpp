@@ -577,8 +577,8 @@ private slots:
         QTRY_VERIFY(runtime.presentationAllowed());
 
         const QSize size = moving ? QSize(320, 224) : QSize(64, 64);
-        std::array<QImage, 17> sources;
-        std::array<QImage, 17> halfway;
+        std::array<QImage, 18> sources;
+        std::array<QImage, 18> halfway;
         std::unique_ptr<QRhiTexture> sourceTexture;
         if (moving || m_rhi->backend() == QRhi::D3D11) {
             for (int i = 0; i < int(sources.size()); ++i) {
@@ -736,7 +736,7 @@ private slots:
             QVERIFY2(generatedPairs >= 3, "Production callback never sustained frame generation from native source arrivals");
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             producer.next = OpenNowStreamerFrameInfo{uint32_t(size.width()), uint32_t(size.height()),
-                                                     14, timestamp};
+                                                     15, timestamp}; // two skipped frames: a single skip is tolerated
             QVERIFY(present());
             QCOMPARE(callback->frameGenerationStats().value(QStringLiteral("status")).toString(),
                      QStringLiteral("discontinuity"));
@@ -745,7 +745,7 @@ private slots:
                      QStringLiteral("sequence-gap"));
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             producer.next = OpenNowStreamerFrameInfo{uint32_t(size.width()), uint32_t(size.height()),
-                                                     15, 2'000'000'000};
+                                                     16, 2'000'000'000};
             QVERIFY(present());
             if (callback->needsFrame()) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -754,7 +754,7 @@ private slots:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             producer.next = OpenNowStreamerFrameInfo{uint32_t(size.width()), uint32_t(size.height()),
-                                                     16, 1'999'999'999};
+                                                     17, 1'999'999'999};
             QVERIFY(present());
             QCOMPARE(callback->frameGenerationStats().value(QStringLiteral("status")).toString(),
                      QStringLiteral("discontinuity"));

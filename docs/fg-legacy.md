@@ -233,6 +233,24 @@ FPS mode), and **Apply** writes `fps`, the mode and the level or target together
 `--smoke-frame-generation-dialog` seeds a 2 ms / 240 Hz measurement and opens the dialog
 for screenshots. The console surface keeps the row controls.
 
+**Mid-game control.** The Ctrl+G stream menu carries a **Frame generation** tile while the
+feature is in use (on, or switched off from that menu during the session); switching it off
+remembers the mode, level and target in memory and switching it back on restores them. The
+same toggle is bound to the `shortcutToggleFrameGeneration` shortcut (default
+`Ctrl+Shift+G`, editable with the other stream shortcuts) and reports the result in the
+stream control message. Frame generation choices are written through the core like every
+other setting, so they survive a restart.
+
+**Pacer tolerance.** The presenter acquires the latest decoded frame, so a decoder or
+network burst skips one source frame. `StreamFramePacer` now treats a single skipped frame
+as continuous once the cadence is known (the pair around it still interpolates, the
+generated frame stands in for the frame that was never shown, and the cadence estimate is
+per frame); two or more skipped frames, timestamp rewinds or jumps and arrival gaps above
+`max(50 ms, 2 × interval)` still re-warm. A source frame that lands while the previous pair
+is still presenting drops that pair's remaining schedule; only four such collisions within a
+second start the two-second overload cooldown. The stats overlay names the reason behind a
+`Discontinuity` (frames skipped, gap length, timestamp rewind or jump, no cadence).
+
 ## Out of scope for v1
 
 Multipliers above 2×, extrapolation, HDR sources, mobile targets and the f16

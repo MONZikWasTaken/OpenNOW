@@ -37,13 +37,20 @@ public:
         m_factor = std::clamp(factor, MinimumFactor, MaximumFactor);
         if (m_hasSource && sequence == m_sequence && timestamp == m_timestamp)
             return Result::Duplicate;
-        const bool consecutive = sequence == m_sequence + 1;
         m_sequenceDelta = sequence >= m_sequence ? sequence - m_sequence : 0;
+        // The presenter acquires the latest decoded frame, so a decoder or network burst
+        // skips one source frame. The pair around it is still adjacent in time and the
+        // generated frame stands in for the one that was never shown; wider gaps, or a
+        // skip before the cadence is known, re-warm.
+        const std::uint64_t span = m_interval && m_sequenceDelta == 2 ? 2 : 1;
+        const bool consecutive = m_sequenceDelta == 1 || span == 2;
         const bool rewound = timestamp && m_timestamp && timestamp < m_timestamp;
         m_timestampDelta = timestamp >= m_timestamp ? timestamp - m_timestamp : 0;
         m_arrivalDelta = now >= m_arrival ? now - m_arrival : 0;
         const bool jumped = m_timestamp && timestamp && m_timestampDelta > 250'000'000;
         const auto gapLimit = m_interval ? std::max<std::int64_t>(50'000'000, m_interval * 2) : 75'000'000;
+        const auto arrivalPerFrame = m_arrivalDelta / std::int64_t(span);
+        const auto timestampPerFrame = m_timestampDelta / span;
         const bool pending = m_pending;
         const bool first = !m_hasSource;
         m_hasSource = true;
@@ -71,8 +78,8 @@ public:
         if (!consecutive) return reject(Rejection::SequenceGap);
         if (rewound) return reject(Rejection::TimestampRegression);
         if (jumped) return reject(Rejection::TimestampJump);
-        if (m_arrivalDelta > gapLimit) return reject(Rejection::ArrivalGap);
-        m_arrivals[m_arrivalSlot] = m_arrivalDelta;
+        if (arrivalPerFrame > gapLimit) return reject(Rejection::ArrivalGap);
+        m_arrivals[m_arrivalSlot] = arrivalPerFrame;
         m_arrivalSlot = (m_arrivalSlot + 1) % m_arrivals.size();
         m_arrivalCount = std::min(m_arrivalCount + 1, m_arrivals.size());
         auto sorted = m_arrivals;
@@ -80,11 +87,11 @@ public:
         const auto observed = m_arrivalCount
             ? (sorted[(m_arrivalCount - 1) / 2] + sorted[m_arrivalCount / 2]) / 2 : 0;
         const bool arrivalUsable = observed >= 2'000'000 && observed <= 40'000'000;
-        const bool sourceUsable = m_timestampDelta >= 2'000'000 && m_timestampDelta <= 40'000'000
-            && (!arrivalUsable || (m_timestampDelta * 4 >= std::uint64_t(observed) * 3
-                                  && m_timestampDelta * 4 <= std::uint64_t(observed) * 5));
+        const bool sourceUsable = timestampPerFrame >= 2'000'000 && timestampPerFrame <= 40'000'000
+            && (!arrivalUsable || (timestampPerFrame * 4 >= std::uint64_t(observed) * 3
+                                  && timestampPerFrame * 4 <= std::uint64_t(observed) * 5));
         if (sourceUsable) {
-            m_interval = m_timestampDelta;
+            m_interval = timestampPerFrame;
             m_timingSource = TimingSource::SourceTimestamps;
         } else if (arrivalUsable) {
             m_interval = observed;
@@ -100,7 +107,18 @@ public:
         if (!std::isfinite(refreshRate)
             || refreshRate < (double(m_factor) - 0.05) * 1e9 / double(m_interval))
             return Result::DisplayTooSlow;
-        if (pending) m_cooldownUntil = now + 2'000'000'000;
+        if (pending) {
+            // A source frame that lands before the previous pair finished presenting drops
+            // that pair's remaining schedule. Isolated collisions are decoder or network
+            // bursts; four within a second mean the presenter cannot keep up, so generation
+            // pauses for two seconds instead of queueing.
+            m_collisions[m_collisionSlot] = now;
+            m_collisionSlot = (m_collisionSlot + 1) % m_collisions.size();
+            m_collisionCount = std::min(m_collisionCount + 1, m_collisions.size());
+            if (m_collisionCount == m_collisions.size()
+                && now - *std::min_element(m_collisions.begin(), m_collisions.end()) <= 1'000'000'000)
+                m_cooldownUntil = now + 2'000'000'000;
+        }
         if (now < m_cooldownUntil) return Result::Overloaded;
         return Result::Interpolate;
     }
@@ -175,6 +193,9 @@ private:
     std::int64_t m_nextDue = 0;
     std::int64_t m_slot = 0;
     std::int64_t m_cooldownUntil = 0;
+    std::array<std::int64_t, 4> m_collisions{};
+    std::size_t m_collisionSlot = 0;
+    std::size_t m_collisionCount = 0;
     int m_factor = 2;
     int m_pendingCount = 0;
     int m_pendingIndex = 0;

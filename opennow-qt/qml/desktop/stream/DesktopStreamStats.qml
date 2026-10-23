@@ -95,9 +95,21 @@ Item {
         case "display-refresh": return qsTr("Display refresh")
         case "source-rate-limit": return qsTr("Source rate too high")
         case "hdr-unavailable": return qsTr("Unavailable with HDR")
-        case "overloaded": return qsTr("Overloaded")
-        case "discontinuity": return qsTr("Discontinuity")
+        case "overloaded": return qsTr("Overloaded") + " · " + qsTr("source frames keep arriving in bursts")
+        case "discontinuity": return qsTr("Discontinuity") + frameGenerationReasonSuffix()
         default: return qsTr("Unavailable")
+        }
+    }
+    // Why the pacer re-warmed, from the render callback's last decision.
+    function frameGenerationReasonSuffix() {
+        const skipped = Math.max(0, Number(frameGenerationStats.sequenceDelta || 0) - 1)
+        switch (String(frameGenerationStats.rejectionReason || "none")) {
+        case "sequence-gap": return " · " + qsTr("%1 source frames skipped").arg(skipped)
+        case "arrival-gap": return " · " + qsTr("%1 ms between frames").arg(Math.round(Number(frameGenerationStats.arrivalDeltaMs || 0)))
+        case "timestamp-regression": return " · " + qsTr("timestamp went backwards")
+        case "timestamp-jump": return " · " + qsTr("timestamp jumped %1 ms").arg(Math.round(Number(frameGenerationStats.timestampDeltaMs || 0)))
+        case "cadence-unavailable": return " · " + qsTr("no usable frame cadence")
+        default: return ""
         }
     }
     function sample(card) {

@@ -14,7 +14,7 @@ const WINDOWS_GPU_DEVICE_ID: &str = "windowsGpuDeviceId";
 const MAXIMUM_WINDOWS_GPU_DEVICE_ID_BYTES: usize = 1024;
 const MAXIMUM_BOOTSTRAP_SETTINGS_BYTES: u64 = 1024 * 1024;
 const MAXIMUM_SHORTCUT_BYTES: usize = 80;
-const SHORTCUT_KEYS: [&str; 9] = [
+const SHORTCUT_KEYS: [&str; 10] = [
     "shortcutToggleStats",
     "shortcutTogglePointerLock",
     "shortcutToggleFullscreen",
@@ -24,6 +24,7 @@ const SHORTCUT_KEYS: [&str; 9] = [
     "shortcutScreenshot",
     "shortcutToggleRecording",
     "shortcutSaveClip",
+    "shortcutToggleFrameGeneration",
 ];
 const RESERVED_SHORTCUTS: [&str; 2] = ["Ctrl+G", "Shift+F3"];
 const HDR_NOTICE_SHOWN: &str = "hdrNoticeShownGameIds";
@@ -1344,7 +1345,7 @@ fn defaults() -> Map<String, Value> {
         "shortcutToggleFullscreen":"F11", "shortcutStopStream":"Ctrl+Shift+Q",
         "shortcutToggleAntiAfk":"Ctrl+Shift+K", "shortcutToggleMicrophone":"Ctrl+Shift+M",
         "shortcutScreenshot":"Ctrl+F11", "shortcutToggleRecording":"F12",
-        "shortcutSaveClip":"Ctrl+F12",
+        "shortcutSaveClip":"Ctrl+F12", "shortcutToggleFrameGeneration":"Ctrl+Shift+G",
         "microphoneMode":"disabled", "microphoneDeviceId":"", "hideStreamButtons":false,
         "muteWhenOutOfFocus":false, "backgroundStreamReminder":false,
         "showAntiAfkIndicator":true, "antiAfkReminderEveryMinutes":15,

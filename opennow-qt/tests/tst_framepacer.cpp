@@ -56,12 +56,47 @@ private slots:
         pacer.source(1, 0, 0, 120);
         pacer.source(2, 16'666'667, 16'666'667, 120);
         pacer.midpoint(16'666'667);
-        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 120), Result::Overloaded);
+        // A single undrained pair is a burst: its schedule is dropped, generation continues.
+        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 120), Result::Interpolate);
         QVERIFY(!pacer.pending());
-        QCOMPARE(pacer.source(4, 50'000'001, 50'000'001, 120), Result::Overloaded);
-        for (std::uint64_t frame = 5; frame < 130; ++frame)
+        pacer.midpoint(33'333'334);
+        QCOMPARE(pacer.source(4, 50'000'001, 50'000'001, 120), Result::Interpolate);
+        pacer.midpoint(50'000'001);
+        QCOMPARE(pacer.source(5, 66'666'668, 66'666'668, 120), Result::Interpolate);
+        pacer.midpoint(66'666'668);
+        // Four undrained pairs within a second: the presenter cannot keep up, cool down.
+        QCOMPARE(pacer.source(6, 83'333'335, 83'333'335, 120), Result::Overloaded);
+        QVERIFY(!pacer.pending());
+        QCOMPARE(pacer.source(7, 100'000'002, 100'000'002, 120), Result::Overloaded);
+        for (std::uint64_t frame = 8; frame < 130; ++frame)
             pacer.source(frame, (frame - 1) * 16'666'667, (frame - 1) * 16'666'667, 120);
         QCOMPARE(pacer.source(130, 129 * 16'666'667ULL, 129 * 16'666'667LL, 120), Result::Interpolate);
+    }
+
+    void oneSkippedSourceFrameKeepsGenerating()
+    {
+        // The presenter acquires the latest decoded frame, so a burst skips one source
+        // frame: the pair around it still interpolates (the generated frame stands in for
+        // the skipped one) and the cadence estimate is unchanged.
+        StreamFramePacer pacer;
+        using Result = StreamFramePacer::Result;
+        pacer.source(1, 0, 0, 165);
+        for (std::uint64_t frame = 2; frame <= 10; ++frame)
+            QCOMPARE(pacer.source(frame, (frame - 1) * 16'666'667, (frame - 1) * 16'666'667, 165),
+                     Result::Interpolate);
+        QCOMPARE(pacer.source(12, 11 * 16'666'667ULL, 11 * 16'666'667LL, 165), Result::Interpolate);
+        QCOMPARE(pacer.rejection(), StreamFramePacer::Rejection::None);
+        QCOMPARE(pacer.sequenceDelta(), 2ULL);
+        QCOMPARE(pacer.interval(), 16'666'667ULL);
+        QCOMPARE(pacer.source(13, 12 * 16'666'667ULL, 12 * 16'666'667LL, 165), Result::Interpolate);
+        // Two or more skipped frames are a real discontinuity.
+        QCOMPARE(pacer.source(16, 15 * 16'666'667ULL, 15 * 16'666'667LL, 165), Result::Discontinuity);
+        QCOMPARE(pacer.rejection(), StreamFramePacer::Rejection::SequenceGap);
+        // Before the cadence is known a skip still re-warms.
+        pacer.reset();
+        pacer.source(1, 0, 0, 165);
+        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 165), Result::Discontinuity);
+        QCOMPARE(pacer.rejection(), StreamFramePacer::Rejection::SequenceGap);
     }
 
     void generatesAboveSixtyFpsWhenTheDisplayAllows()
@@ -157,11 +192,16 @@ private slots:
         StreamFramePacer pacer;
         pacer.source(1, 0, 0, 360, 4);
         pacer.source(2, 16'666'667, 16'666'667, 360, 4);
-        pacer.generated(16'666'667, 3);
-        QCOMPARE(pacer.takeNext(16'666'667 + 4'166'666, 360).kind, StreamFramePacer::Next::Kind::Generated);
-        QVERIFY(pacer.pending());
-        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 360, 4), StreamFramePacer::Result::Overloaded);
-        QVERIFY(!pacer.pending());
+        for (std::uint64_t frame = 3; frame <= 6; ++frame) {
+            const auto previous = std::int64_t(frame - 2) * 16'666'667;
+            pacer.generated(previous, 3);
+            QCOMPARE(pacer.takeNext(previous + 4'166'666, 360).kind, StreamFramePacer::Next::Kind::Generated);
+            QVERIFY(pacer.pending());
+            // Partially drained pairs count like undrained ones: the fourth in a second cools down.
+            QCOMPARE(pacer.source(frame, (frame - 1) * 16'666'667, (frame - 1) * 16'666'667, 360, 4),
+                     frame < 6 ? StreamFramePacer::Result::Interpolate : StreamFramePacer::Result::Overloaded);
+            QVERIFY(!pacer.pending());
+        }
     }
 
     void highRefreshDoesNotCompressTheOriginalPair()
@@ -210,9 +250,10 @@ private slots:
         using Result = StreamFramePacer::Result;
         pacer.source(1, 0, 0, 60);
         QCOMPARE(pacer.source(2, 0, 16'666'667, 60), Result::DisplayTooSlow);
-        QCOMPARE(pacer.source(4, 0, 33'333'334, 165), Result::Discontinuity);
+        // One skipped frame is tolerated once the cadence is known; two are not.
+        QCOMPARE(pacer.source(5, 0, 66'666'668, 165), Result::Discontinuity);
         QCOMPARE(pacer.rejection(), StreamFramePacer::Rejection::SequenceGap);
-        QCOMPARE(pacer.source(5, 0, 200'000'000, 165), Result::Discontinuity);
+        QCOMPARE(pacer.source(6, 0, 250'000'000, 165), Result::Discontinuity);
         QCOMPARE(pacer.rejection(), StreamFramePacer::Rejection::ArrivalGap);
     }
 
@@ -258,9 +299,18 @@ private slots:
                 QCOMPARE(pacer.interval(), 16'666'667ULL);
             }
         }
+        // One undrained pair after the bursts is dropped without a cooldown; sustained
+        // undrained pairs still surface the backpressure.
         pacer.midpoint(now);
-        QCOMPARE(pacer.source(31, 0, now + 31'333'334, 165), Result::Overloaded);
+        now += 31'333'334;
+        QCOMPARE(pacer.source(31, 0, now, 165), Result::Interpolate);
         QVERIFY(!pacer.pending());
+        for (std::uint64_t frame = 32; frame <= 34; ++frame) {
+            pacer.midpoint(now);
+            now += frame % 2 ? 31'333'334 : 2'000'000;
+            QCOMPARE(pacer.source(frame, 0, now, 165), frame < 34 ? Result::Interpolate : Result::Overloaded);
+            QVERIFY(!pacer.pending());
+        }
     }
 
     void simultaneousArrivalsCannotMasqueradeAsSlowerInput()

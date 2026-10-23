@@ -332,6 +332,7 @@ FocusScope {
             rows.push(shortcut("Toggle fullscreen", "Switch the Qt application surface between fullscreen and windowed", "shortcutToggleFullscreen"))
             rows.push(shortcut("Stop stream", "End the active GeForce NOW session", "shortcutStopStream"))
             rows.push(shortcut("Toggle anti-AFK", "Enable or disable the session activity helper", "shortcutToggleAntiAfk"))
+            rows.push(shortcut(qsTr("Toggle frame generation"), qsTr("Switch frame generation on or off while streaming."), "shortcutToggleFrameGeneration"))
             rows.push(shortcut("Screenshot", "Save the current decoded frame", "shortcutScreenshot"))
             rows.push(shortcut(qsTr("Toggle recording"), qsTr("Start or stop a source-quality recording during a stream."), "shortcutToggleRecording"))
             rows.push(shortcut(qsTr("Save replay clip"), qsTr("Save the buffered video and audio. Requires the replay buffer to be enabled for this session."), "shortcutSaveClip"))
