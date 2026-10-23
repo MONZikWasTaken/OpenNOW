@@ -1212,6 +1212,15 @@ QtObject {
     // Frame generation facade: levels, target FPS, display refresh and the capability test
     // are owned by SettingsState.
     function frameGenerationFactor() { return settingsOwner.frameGenerationFactor() }
+    function frameGenerationRequestedFactor() { return settingsOwner.frameGenerationRequestedFactor() }
+    function frameGenerationMode() { return settingsOwner.frameGenerationMode() }
+    function frameGenerationModes() { return settingsOwner.frameGenerationModes }
+    function selectFrameGenerationMode(mode) { settingsOwner.selectFrameGenerationMode(mode) }
+    function frameGenerationMultiplierDescription() { return settingsOwner.frameGenerationMultiplierDescription() }
+    function frameGenerationTargetDescription() { return settingsOwner.frameGenerationTargetDescription() }
+    function frameGenerationUnlocked() { return settingsOwner.frameGenerationUnlocked() }
+    function frameGenerationProfileKey() { return settingsOwner.frameGenerationProfileKey() }
+    function frameGenerationTestDescription() { return settingsOwner.frameGenerationTestDescription() }
     function frameGenerationSourceFps() { return settingsOwner.frameGenerationSourceFps() }
     function frameGenerationDisplayHz() { return settingsOwner.frameGenerationDisplayHz() }
     function frameGenerationDescription() { return settingsOwner.frameGenerationDescription() }

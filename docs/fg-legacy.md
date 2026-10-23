@@ -169,8 +169,9 @@ all owned by `SettingsState` (QML) with the Rust core validating every value:
 
 | key | values | meaning |
 |---|---|---|
-| `frameGeneration` | `off`, `2x`, `3x`, `4x` | displayed frames per source frame (the level) |
-| `frameGenerationTargetFps` | 0 or 30…1000 | 0 follows the level; otherwise the requested output rate, and the level is derived as `round(target / source fps)` clamped to 2…4 |
+| `frameGenerationMode` | `off`, `multiplier`, `target`, `display` | how the output rate is chosen; a profile saved before the mode existed with a level set is read as `multiplier` |
+| `frameGeneration` | `off`, `2x`, `3x`, `4x` | the level in multiplier mode; in the other modes it mirrors the derived factor |
+| `frameGenerationTargetFps` | 0 or 30…1000 | the requested output rate in target mode; the level is derived as `round(target / source fps)` clamped to 2…4. Display mode takes the largest allowed multiplier the display can show |
 | `frameGenerationDisplayHz` | 0 or 30…1000 | 0 uses the refresh rate of the display OpenNOW is on; otherwise a manual override for displays that report nothing or the wrong value |
 | `frameGenerationProfiles` | object, ≤ 64 entries | capability test results keyed by `engine|gpu|WxH|fps` (`fps` is `auto` when the stream rate is Auto) |
 
@@ -197,21 +198,25 @@ around the blocking offscreen frame, and reports p50/p95/max plus the GPU name
 - Display: `refresh ≥ fps × N × 0.975` (skipped when the refresh is unknown).
 - Engine: `N ≤ engineMaxFactor`.
 
-The result is stored under the preset key, so changing resolution, frame rate or GPU shows
-the levels as locked again until that combination is tested. Levels and target rates the
-profile does not allow are disabled in the UI with a hint; a selection that the test rules
-out is reset to Off. The runtime still honours whatever is stored (the acceptance contract
-`applySetting("frameGeneration", "2x")` → surfaces enable is unchanged); the gate is in the
-settings UI, which is the only normal path to enable it. The first-run Boost step keeps its
-simple Off / 2× choice.
+The result is stored under the preset key, so changing resolution, frame rate or GPU makes
+frame generation unavailable again until that combination is tested. Until a passing
+profile exists the feature is off everywhere: the level and target controls are disabled,
+and the stream surfaces ignore a stored level (`frameGenerationFactor()` returns 0 unless the
+profile allows the requested factor). Levels and target rates the profile does not allow are
+disabled with a hint, and a selection that the test rules out is reset to Off. The first-run
+Boost step keeps its Off / 2× choice as a preference that takes effect after the test.
 
 ### UI
 
-Desktop (Streaming page) and console (Video settings) show the same four controls: level
-segments, a **Run test** button, **Target FPS** (Level, or the rates the display can show
-at 2…4× the stream rate), **Display refresh** (Auto with the detected value, or an
-override), and a GitHub icon that opens the Framegen repository. The stats overlay badge
-reads `FRAME GEN N×`.
+Desktop (Streaming page) and console (Video settings) show the same controls: a
+**capability test** row with the status and the **Run test** button (plus a GitHub icon
+that opens the Framegen repository), then one **mode** control, Off / Multiplier / Target
+FPS / Display, greyed out until the test has passed, followed by the one control the mode
+needs: the multiplier chips, or the output rates the display can show at 2…4× the stream
+rate. Display mode needs nothing more; it reports which multiplier the display gets.
+**Display refresh override** lives under Advanced: Auto shows the detected rate and only
+needs changing when the platform reports nothing or the wrong value. The stats overlay
+badge reads `FRAME GEN N×` while generation actually runs.
 
 ## Out of scope for v1
 

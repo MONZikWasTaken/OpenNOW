@@ -493,14 +493,45 @@ QtObject {
         return override > 0 ? override : Number(detectedDisplayHz || 0)
     }
     function frameGenerationTargetFps() { return Number(settings.frameGenerationTargetFps || 0) }
-    // 0 when off; with a target FPS the level follows the stream rate (round(target / source)).
-    function frameGenerationFactor() {
-        const target = frameGenerationTargetFps()
-        if (target > 0) {
-            const factor = Math.round(target / frameGenerationSourceFps())
-            return factor >= 2 ? Math.min(4, factor) : 0
+    // The level the saved settings ask for (0 = off); with a target FPS the level follows
+    // the stream rate (round(target / source)).
+    readonly property var frameGenerationModes: ["off", "multiplier", "target", "display"]
+    // How the output rate is chosen: off, a fixed multiplier, a target FPS, or the display.
+    function frameGenerationMode() {
+        const mode = String(settings.frameGenerationMode || "")
+        if (frameGenerationModes.indexOf(mode) >= 0) return mode
+        return frameGenerationLevelFactor(settings.frameGeneration) ? "multiplier" : "off"
+    }
+    function frameGenerationTargetFactor(target) {
+        const factor = Math.round(Number(target) / frameGenerationSourceFps())
+        return factor >= 2 ? Math.min(4, factor) : 0
+    }
+    // Largest allowed multiplier the display can show for the stream rate (0 = none).
+    function frameGenerationDisplayFactor() {
+        const source = frameGenerationSourceFps(), display = frameGenerationDisplayHz()
+        if (display <= 0) return 0
+        for (let factor = 4; factor >= 2; --factor)
+            if (source * factor <= display * 1.025 && frameGenerationAllowed(factor)) return factor
+        return 0
+    }
+    function frameGenerationRequestedFactor() {
+        switch (frameGenerationMode()) {
+        case "multiplier": return frameGenerationLevelFactor(settings.frameGeneration)
+        case "target": return frameGenerationTargetFactor(frameGenerationTargetFps())
+        case "display": return frameGenerationDisplayFactor()
+        default: return 0
         }
-        return frameGenerationLevelFactor(settings.frameGeneration)
+    }
+    // The level that actually runs: frame generation is unavailable until the capability
+    // test has passed for the current preset, and only the factors it allowed run.
+    function frameGenerationFactor() {
+        const factor = frameGenerationRequestedFactor()
+        return factor >= 2 && frameGenerationAllowed(factor) ? factor : 0
+    }
+    // True once the capability test allowed at least one level for the current preset.
+    function frameGenerationUnlocked() {
+        const profile = frameGenerationProfile()
+        return !!profile && (profile.allowed || []).length > 0
     }
     function frameGenerationOutputFps() { return frameGenerationSourceFps() * frameGenerationFactor() }
     function ensureFrameGenerationGpu() {
@@ -527,10 +558,10 @@ QtObject {
             ? qsTr("Not sustainable at %1 and %2 FPS on this GPU or display").arg(resolution).arg(frameGenerationSourceFps())
             : qsTr("Run the capability test to unlock this level")
     }
-    // Output rates the display can show at 2x..4x the stream rate; 0 follows the level.
+    // Output rates the display can show at 2x..4x the stream rate.
     function frameGenerationTargetOptions() {
         const source = frameGenerationSourceFps(), display = frameGenerationDisplayHz()
-        const options = [{value: 0, label: qsTr("Level"), enabled: true, factor: 0}]
+        const options = []
         canonicalFpsValues().forEach(rate => {
             const factor = Math.round(rate / source)
             if (factor < 2 || factor > 4 || Math.abs(rate - factor * source) > source * 0.1) return
@@ -539,23 +570,51 @@ QtObject {
         })
         return options
     }
+    // Keeps the stored level in step with the mode's factor so overlays and older readers agree.
+    function storeFrameGenerationLevel(factor) {
+        applySetting("frameGeneration", factor >= 2 ? frameGenerationLevels[Math.min(4, factor) - 2] : "off")
+    }
+    function selectFrameGenerationMode(mode) {
+        mode = frameGenerationModes.indexOf(String(mode)) >= 0 ? String(mode) : "off"
+        if (mode === "off") {
+            applySetting("frameGeneration", "off")
+            applySetting("frameGenerationMode", "off")
+            return
+        }
+        if (mode === "multiplier") {
+            if (frameGenerationLevelFactor(settings.frameGeneration) === 0) {
+                const first = frameGenerationLevels.find(value => frameGenerationAllowed(frameGenerationLevelFactor(value)))
+                if (first) applySetting("frameGeneration", first)
+            }
+        } else if (mode === "target") {
+            const options = frameGenerationTargetOptions().filter(option => option.enabled)
+            let target = frameGenerationTargetFps()
+            if (!options.some(option => option.value === target)) {
+                target = options.length ? options[0].value : 0
+                applySetting("frameGenerationTargetFps", target)
+            }
+            storeFrameGenerationLevel(frameGenerationTargetFactor(target))
+        } else {
+            storeFrameGenerationLevel(frameGenerationDisplayFactor())
+        }
+        applySetting("frameGenerationMode", mode)
+    }
     function selectFrameGenerationLevel(value) {
-        applySetting("frameGenerationTargetFps", 0)
-        applySetting("frameGeneration", frameGenerationLevels.indexOf(String(value)) >= 0 ? String(value) : "off")
+        const known = frameGenerationLevels.indexOf(String(value)) >= 0
+        applySetting("frameGeneration", known ? String(value) : "off")
+        applySetting("frameGenerationMode", known ? "multiplier" : "off")
     }
     function selectFrameGenerationTarget(value) {
         const target = Number(value) > 0 ? Number(value) : 0
         applySetting("frameGenerationTargetFps", target)
-        if (target > 0) {
-            // Keep the stored level in step so overlays and older readers agree.
-            const factor = Math.min(4, Math.max(2, Math.round(target / frameGenerationSourceFps())))
-            applySetting("frameGeneration", frameGenerationLevels[factor - 2])
-        }
+        storeFrameGenerationLevel(frameGenerationTargetFactor(target))
+        applySetting("frameGenerationMode", target > 0 ? "target" : "off")
     }
     function selectFrameGenerationDisplayHz(value) {
         applySetting("frameGenerationDisplayHz", Number(value) > 0 ? Number(value) : 0)
     }
-    function frameGenerationDescription() {
+    // Status of the capability test for the current preset (its own settings row).
+    function frameGenerationTestDescription() {
         const resolution = frameGenerationResolution().text.replace("x", "×")
         const source = frameGenerationSourceFps()
         if (FrameGenerationBenchmark.running)
@@ -564,7 +623,7 @@ QtObject {
             return qsTr("Capability test failed: %1").arg(frameGenerationTestError)
         const profile = frameGenerationProfile()
         if (!profile)
-            return qsTr("Run the capability test to unlock frame generation for %1 at %2 FPS. Adds latency and artifacts.").arg(resolution).arg(source)
+            return qsTr("Not tested for %1 at %2 FPS. Frame generation stays unavailable until this GPU passes the test.").arg(resolution).arg(source)
         const allowed = profile.allowed || []
         if (!allowed.length)
             return qsTr("Too slow for frame generation at %1 and %2 FPS (%3 ms per generated frame).")
@@ -573,12 +632,36 @@ QtObject {
             .arg(profile.gpu || frameGenerationGpu).arg(Number(profile.p95Ms || 0).toFixed(1))
             .arg(Math.max.apply(null, allowed)).arg(resolution).arg(source)
     }
-    function frameGenerationOutputDescription() {
-        const factor = frameGenerationFactor(), display = frameGenerationDisplayHz()
-        if (factor < 2) return qsTr("Off. The stream is shown at its own %1 FPS.").arg(frameGenerationSourceFps())
-        return display > 0
-            ? qsTr("%1× → %2 FPS on a %3 Hz display.").arg(factor).arg(frameGenerationOutputFps()).arg(Math.round(display))
-            : qsTr("%1× → %2 FPS. Display refresh unknown; set it below.").arg(factor).arg(frameGenerationOutputFps())
+    // Description of the mode control: what will run for the selected mode.
+    function frameGenerationDescription() {
+        if (!frameGenerationUnlocked())
+            return qsTr("Unavailable until the capability test passes for the selected resolution and frame rate.")
+        const factor = frameGenerationFactor(), source = frameGenerationSourceFps(), display = frameGenerationDisplayHz()
+        switch (frameGenerationMode()) {
+        case "multiplier":
+            return factor >= 2 ? qsTr("Fixed multiplier: %1× → %2 FPS.").arg(factor).arg(source * factor)
+                               : qsTr("Pick a multiplier below.")
+        case "target":
+            return factor >= 2 ? qsTr("Target %1 FPS → %2× of the %3 FPS stream.").arg(frameGenerationTargetFps()).arg(factor).arg(source)
+                               : qsTr("Pick an output rate below.")
+        case "display":
+            if (factor >= 2)
+                return qsTr("Follows the display: %1 Hz → %2× (%3 FPS).").arg(Math.round(display)).arg(factor).arg(source * factor)
+            return display > 0
+                ? qsTr("The %1 Hz display cannot show 2× the %2 FPS stream.").arg(Math.round(display)).arg(source)
+                : qsTr("Display refresh unknown. Set the override under Advanced.")
+        default:
+            return qsTr("Off. The stream is shown at its own %1 FPS.").arg(source)
+        }
+    }
+    function frameGenerationOutputDescription() { return frameGenerationDescription() }
+    function frameGenerationMultiplierDescription() {
+        return qsTr("Displayed frames per source frame. Adds latency and artifacts.")
+    }
+    function frameGenerationTargetDescription() {
+        return frameGenerationTargetOptions().length
+            ? qsTr("Output rate for the %1 FPS stream; the multiplier follows.").arg(frameGenerationSourceFps())
+            : qsTr("No output rate between 2× and 4× of the stream fits this display.")
     }
     function frameGenerationDisplayDescription() {
         const detected = Math.round(Number(detectedDisplayHz || 0))
@@ -586,7 +669,7 @@ QtObject {
         if (override > 0)
             return qsTr("Override: %1 Hz (detected %2 Hz). Auto uses the display OpenNOW is on.").arg(override).arg(detected)
         return detected > 0
-            ? qsTr("Detected %1 Hz on the current display. Override if detection is wrong.").arg(detected)
+            ? qsTr("Auto: %1 Hz detected on the current display. Only override this when detection is wrong.").arg(detected)
             : qsTr("Display refresh could not be detected. Choose it so the pacer can schedule frames.")
     }
     function runFrameGenerationTest() {

@@ -161,19 +161,9 @@ Column {
             }
         }
         DesktopSettingsRow {
-            objectName: "frameGenerationRow"
-            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Frame generation (Experimental)")
-            description: ShellStore.frameGenerationDescription()
-            DesktopSettingsSegmented {
-                objectName: "frameGenerationLevels"
-                readonly property int factor: ShellStore.frameGenerationFactor()
-                options: [{label: qsTr("Off"), value: "off"}, {label: qsTr("2×"), value: "2x"},
-                          {label: qsTr("3×"), value: "3x"}, {label: qsTr("4×"), value: "4x"}]
-                optionWidth: 48; selectedIndex: factor >= 2 ? factor - 1 : 0
-                disabledValues: ShellStore.frameGenerationLockedValues()
-                disabledHint: ShellStore.frameGenerationLockedHint()
-                onSelected: (index,item) => ShellStore.selectFrameGenerationLevel(item.value)
-            }
+            objectName: "frameGenerationTestRow"
+            width: parent.width; paperStyle: true; glyph: "check"; title: qsTr("Frame generation capability test")
+            description: ShellStore.frameGenerationTestDescription()
             DesktopSettingsButton {
                 objectName: "frameGenerationTestButton"
                 compact: true
@@ -206,9 +196,45 @@ Column {
             }
         }
         DesktopSettingsRow {
+            objectName: "frameGenerationRow"
+            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Frame generation (Experimental)")
+            description: ShellStore.frameGenerationDescription()
+            enabled: ShellStore.frameGenerationUnlocked()
+            opacity: enabled ? 1 : 0.45
+            DesktopSettingsSegmented {
+                objectName: "frameGenerationMode"
+                optionObjectNamePrefix: "frameGenerationMode-"
+                readonly property string mode: ShellStore.frameGenerationMode()
+                options: [{label: qsTr("Off"), value: "off"}, {label: qsTr("Multiplier"), value: "multiplier"},
+                          {label: qsTr("Target FPS"), value: "target"}, {label: qsTr("Display"), value: "display"}]
+                optionWidth: 86; selectedIndex: Math.max(0, options.findIndex(item => item.value === mode))
+                onSelected: (index,item) => ShellStore.selectFrameGenerationMode(item.value)
+            }
+        }
+        DesktopSettingsRow {
+            objectName: "frameGenerationMultiplierRow"
+            visible: ShellStore.frameGenerationMode() === "multiplier"
+            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Multiplier")
+            description: ShellStore.frameGenerationMultiplierDescription()
+            enabled: ShellStore.frameGenerationUnlocked()
+            opacity: enabled ? 1 : 0.45
+            DesktopSettingsSegmented {
+                objectName: "frameGenerationLevels"
+                readonly property int factor: ShellStore.frameGenerationRequestedFactor()
+                options: [{label: qsTr("2×"), value: "2x"}, {label: qsTr("3×"), value: "3x"}, {label: qsTr("4×"), value: "4x"}]
+                optionWidth: 48; selectedIndex: factor >= 2 ? factor - 2 : -1
+                disabledValues: ShellStore.frameGenerationLockedValues()
+                disabledHint: ShellStore.frameGenerationLockedHint()
+                onSelected: (index,item) => ShellStore.selectFrameGenerationLevel(item.value)
+            }
+        }
+        DesktopSettingsRow {
             objectName: "frameGenerationTargetRow"
-            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Target FPS")
-            description: ShellStore.frameGenerationOutputDescription()
+            visible: ShellStore.frameGenerationMode() === "target"
+            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Output rate")
+            description: ShellStore.frameGenerationTargetDescription()
+            enabled: ShellStore.frameGenerationUnlocked()
+            opacity: enabled ? 1 : 0.45
             DesktopSettingsSegmented {
                 objectName: "frameGenerationTarget"
                 optionObjectNamePrefix: "frameGenerationTarget-"
@@ -216,24 +242,9 @@ Column {
                 readonly property int current: Number(page.settingsScreen.valueSetting("frameGenerationTargetFps", 0))
                 options: targets.map(option => ({label: option.label, value: option.value, enabled: option.enabled}))
                 optionWidth: 52
-                selectedIndex: Math.max(0, options.findIndex(item => item.value === current))
+                selectedIndex: options.findIndex(item => item.value === current)
                 disabledHint: ShellStore.frameGenerationLockedHint()
                 onSelected: (index,item) => ShellStore.selectFrameGenerationTarget(item.value)
-            }
-        }
-        DesktopSettingsRow {
-            objectName: "frameGenerationDisplayRow"
-            width: parent.width; paperStyle: true; glyph: "monitor"; title: qsTr("Display refresh")
-            description: ShellStore.frameGenerationDisplayDescription()
-            DesktopSettingsSegmented {
-                objectName: "frameGenerationDisplayHz"
-                optionObjectNamePrefix: "frameGenerationDisplay-"
-                readonly property int current: Number(page.settingsScreen.valueSetting("frameGenerationDisplayHz", 0))
-                options: [{label: qsTr("Auto"), value: 0}].concat(
-                    ShellStore.frameGenerationDisplayChoices().map(hz => ({label: String(hz), value: hz})))
-                optionWidth: 44
-                selectedIndex: Math.max(0, options.findIndex(item => item.value === current))
-                onSelected: (index,item) => ShellStore.selectFrameGenerationDisplayHz(item.value)
             }
         }
     }
@@ -364,6 +375,21 @@ Column {
             DesktopSettingsRow {
                 width: parent.width; paperStyle: true; glyph: "controller"; title: qsTr("Steam Deck identity"); description: qsTr("Unlock Deck resolutions and 90 FPS · refreshes entitlements")
                 DesktopSettingsToggle { checked: page.settingsScreen.boolSetting("identifyAsSteamDeck",false); onValueChangedByUser: value => page.settingsScreen.setSetting("identifyAsSteamDeck",value) }
+            }
+            DesktopSettingsRow {
+                objectName: "frameGenerationDisplayRow"
+                width: parent.width; paperStyle: true; glyph: "monitor"; title: qsTr("Display refresh override")
+                description: ShellStore.frameGenerationDisplayDescription()
+                DesktopSettingsSegmented {
+                    objectName: "frameGenerationDisplayHz"
+                    optionObjectNamePrefix: "frameGenerationDisplay-"
+                    readonly property int current: Number(page.settingsScreen.valueSetting("frameGenerationDisplayHz", 0))
+                    options: [{label: qsTr("Auto"), value: 0}].concat(
+                        ShellStore.frameGenerationDisplayChoices().map(hz => ({label: String(hz), value: hz})))
+                    optionWidth: 44
+                    selectedIndex: Math.max(0, options.findIndex(item => item.value === current))
+                    onSelected: (index,item) => ShellStore.selectFrameGenerationDisplayHz(item.value)
+                }
             }
         }
     }

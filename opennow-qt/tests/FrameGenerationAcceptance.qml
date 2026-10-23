@@ -25,6 +25,12 @@ QtObject {
         const four = find(parent, "settingsOption-4x")
         check(two && three && four, "2x, 3x and 4x levels exist")
         check(!two.enabled && !three.enabled && !four.enabled, "levels are locked before a capability test")
+        check(!find(parent, "frameGenerationTestButton") || find(parent, "frameGenerationTestButton").enabled,
+            "the capability test can be started")
+        // A saved level without a passing profile must not run: the surfaces stay off.
+        ShellStore.settings = Object.assign({}, ShellStore.settings, {frameGeneration: "2x"})
+        check(ShellStore.frameGenerationFactor() === 0, "an untested preset never generates frames")
+        ShellStore.settings = Object.assign({}, ShellStore.settings, {frameGeneration: "off"})
         ShellStore.ensureFrameGenerationGpu()
         const profiles = {}
         profiles[ShellStore.settingsOwnerState.frameGenerationProfileKey()] = {

@@ -519,6 +519,20 @@ impl SettingsStore {
             "off",
         );
         normalize_frame_generation_profiles(&mut self.values);
+        // How the output rate is chosen. Profiles saved before the mode existed carry only
+        // the level, so a saved level means multiplier mode.
+        normalize_choice(
+            &mut self.values,
+            "frameGenerationMode",
+            &["off", "multiplier", "target", "display"],
+            "off",
+        );
+        if self.values["frameGenerationMode"] == json!("off")
+            && self.values["frameGeneration"] != json!("off")
+        {
+            self.values
+                .insert("frameGenerationMode".to_owned(), json!("multiplier"));
+        }
         // 0 = follow the level; otherwise the requested displayed frame rate.
         clamp_integer(&mut self.values, "frameGenerationTargetFps", 0, 1000, 0);
         // 0 = detect from the display OpenNOW is on; otherwise a manual refresh override.
@@ -1310,7 +1324,7 @@ fn defaults() -> Map<String, Value> {
     json!({
         "onboardingCompleted":false,
         "resolution":"1920x1080", "aspectRatio":"16:9", "posterSizeScale":1.05,
-        "fps":60, "frameGeneration":"off", "frameGenerationTargetFps":0, "frameGenerationDisplayHz":0, "frameGenerationProfiles":{}, "upscaling":"off", "upscalingSharpness":10, "upscalingDenoise":0,
+        "fps":60, "frameGeneration":"off", "frameGenerationMode":"off", "frameGenerationTargetFps":0, "frameGenerationDisplayHz":0, "frameGenerationProfiles":{}, "upscaling":"off", "upscalingSharpness":10, "upscalingDenoise":0,
         "maxBitrateMbps":75, "saveBandwidth":false, "recordingBitrateMbps":null,
         "recordingResolution":"720p", "recordingFps":30, "streamClientMode":"native",
         "replayBufferEnabled":false, "replayBufferSeconds":30, "replayBufferMemoryMiB":256,
@@ -3206,6 +3220,22 @@ mod tests {
             store.set("frameGenerationDisplayHz", json!("fast")).unwrap(),
             json!(0)
         );
+        // Mode: off by default; a saved level without a mode means multiplier mode.
+        store.set("frameGeneration", json!("off")).unwrap();
+        store.set("frameGenerationMode", json!("off")).unwrap();
+        assert_eq!(store.all()["frameGenerationMode"], json!("off"));
+        assert_eq!(
+            store.set("frameGenerationMode", json!("display")).unwrap(),
+            json!("display")
+        );
+        assert_eq!(
+            store.set("frameGenerationMode", json!("bogus")).unwrap(),
+            json!("off")
+        );
+        store.set("frameGeneration", json!("2x")).unwrap();
+        assert_eq!(store.all()["frameGenerationMode"], json!("multiplier"));
+        store.set("frameGenerationMode", json!("target")).unwrap();
+        assert_eq!(store.all()["frameGenerationMode"], json!("target"));
 
         fs::write(
             directory.join("settings.json"),
