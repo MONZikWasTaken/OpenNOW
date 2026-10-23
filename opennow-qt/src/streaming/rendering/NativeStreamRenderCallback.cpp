@@ -299,8 +299,13 @@ public:
         if (m_frameGenerationFactor < 2 || m_frameGenerationFailed) return;
 
         const auto now = clockNs();
+        // The presenter is stalled when nothing new has reached the display for a while;
+        // a source frame arriving early on its own is a burst, not overload.
+        const auto swaps = m_swapTimings.snapshot();
+        const bool presenterStalled = swaps.hasLastSwap && now - swaps.lastSwapNs
+            > std::max<std::int64_t>(100'000'000, 4 * std::int64_t(m_pacer.interval()));
         const auto decision = m_pacer.source(info.sequence, info.presentation_time_ns, now,
-                                             m_refreshRate, m_frameGenerationFactor);
+                                             m_refreshRate, m_frameGenerationFactor, presenterStalled);
         updateTimingStats();
         if (decision == StreamFramePacer::Result::Duplicate) {
             m_outputDirty = false;
@@ -474,6 +479,7 @@ public:
     {
         if (!m_runtime || !m_runtime->presentationAllowed()
                 || m_presentationGeneration != m_runtime->presentationGeneration()) return;
+        logFrameGenerationStatus();
         m_textures.render(commandBuffer, m_stencil, m_stencilReference);
         if (m_outputDirty) {
             m_submittedKind.store(m_outputKind);
@@ -565,6 +571,9 @@ private:
     int m_frameGenerationFactor = 0;
     std::atomic_int m_reportedFactor = 0;
     std::atomic_int m_effectiveFactor = 0;
+    FrameGenerationState m_loggedStatus = FrameGenerationState::Off;
+    std::int64_t m_lastStatusLogNs = 0;
+    int m_suppressedStatusChanges = 0;
     QSize m_upscalingTarget;
     bool m_fsrUpscaling = false;
     int m_upscalingSharpness = 10;
@@ -596,6 +605,39 @@ private:
     static std::int64_t clockNs()
     {
         return streamMonotonicClockNs();
+    }
+
+    // Every frame-generation status change goes to qt-native.log with the pacer's numbers,
+    // at most five lines a second; flickers in between are counted, not written.
+    void logFrameGenerationStatus()
+    {
+        const auto status = m_frameGenerationStatus.load();
+        if (status == m_loggedStatus) return;
+        const auto now = clockNs();
+        m_loggedStatus = status;
+        if (m_lastStatusLogNs && now - m_lastStatusLogNs < 200'000'000) {
+            ++m_suppressedStatusChanges;
+            return;
+        }
+        if (!m_runtime) return;
+        const auto stats = frameGenerationStats();
+        m_runtime->logRenderDiagnostic(QStringLiteral(
+            "frame-generation status=%1 reason=%2 timing=%3 factor=%4/%5 interval=%6ms stamp=%7ms arrival=%8ms "
+            "seq-delta=%9 refresh=%10 output=%11fps suppressed=%12")
+            .arg(stats.value(QStringLiteral("status")).toString(),
+                 stats.value(QStringLiteral("rejectionReason")).toString(),
+                 stats.value(QStringLiteral("timingSource")).toString())
+            .arg(stats.value(QStringLiteral("effectiveFactor")).toInt())
+            .arg(stats.value(QStringLiteral("factor")).toInt())
+            .arg(stats.value(QStringLiteral("sourceIntervalMs")).toDouble(), 0, 'f', 2)
+            .arg(stats.value(QStringLiteral("timestampDeltaMs")).toDouble(), 0, 'f', 2)
+            .arg(stats.value(QStringLiteral("arrivalDeltaMs")).toDouble(), 0, 'f', 2)
+            .arg(stats.value(QStringLiteral("sequenceDelta")).toULongLong())
+            .arg(stats.value(QStringLiteral("refreshRateHz")).toDouble(), 0, 'f', 1)
+            .arg(stats.value(QStringLiteral("outputFps")).toDouble(), 0, 'f', 0)
+            .arg(m_suppressedStatusChanges));
+        m_lastStatusLogNs = now;
+        m_suppressedStatusChanges = 0;
     }
 
     void updateTimingStats()

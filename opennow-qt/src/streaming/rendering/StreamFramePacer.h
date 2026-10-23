@@ -30,9 +30,16 @@ public:
     // Below this source interval (250 FPS) generation is pointless and the pacing
     // noise exceeds the slot width.
     static constexpr std::uint64_t MinimumSourceInterval = 4'000'000;
+    // The display must show factor frames per source interval; the same tolerance as the
+    // capability test, so 59.94 Hz class sources run on 120 Hz class displays and 60 FPS x 4
+    // on panels that report 239.96 Hz.
+    static constexpr double DisplayTolerance = 0.975;
 
+    // `presenterStalled`: nothing new has reached the display for a while. Only then does a
+    // source frame that lands on an unfinished pair count as overload; otherwise it is a
+    // burst and the newest pair simply wins.
     Result source(std::uint64_t sequence, std::uint64_t timestamp,
-                  std::int64_t now, double refreshRate, int factor = 2)
+                  std::int64_t now, double refreshRate, int factor = 2, bool presenterStalled = false)
     {
         m_factor = std::clamp(factor, MinimumFactor, MaximumFactor);
         if (m_hasSource && sequence == m_sequence && timestamp == m_timestamp)
@@ -73,28 +80,44 @@ public:
             m_interval = 0;
             m_arrivalCount = 0;
             m_arrivalSlot = 0;
+            m_timestampCount = 0;
+            m_timestampSlot = 0;
             return Result::Discontinuity;
         };
         if (!consecutive) return reject(Rejection::SequenceGap);
         if (rewound) return reject(Rejection::TimestampRegression);
         if (jumped) return reject(Rejection::TimestampJump);
         if (arrivalPerFrame > gapLimit) return reject(Rejection::ArrivalGap);
+        const auto median = [](const std::array<std::int64_t, 8> &ring, std::size_t count) {
+            if (!count) return std::int64_t(0);
+            auto sorted = ring;
+            std::sort(sorted.begin(), sorted.begin() + count);
+            return (sorted[(count - 1) / 2] + sorted[count / 2]) / 2;
+        };
         m_arrivals[m_arrivalSlot] = arrivalPerFrame;
         m_arrivalSlot = (m_arrivalSlot + 1) % m_arrivals.size();
         m_arrivalCount = std::min(m_arrivalCount + 1, m_arrivals.size());
-        auto sorted = m_arrivals;
-        std::sort(sorted.begin(), sorted.begin() + m_arrivalCount);
-        const auto observed = m_arrivalCount
-            ? (sorted[(m_arrivalCount - 1) / 2] + sorted[m_arrivalCount / 2]) / 2 : 0;
+        const auto observed = median(m_arrivals, m_arrivalCount);
+        // Source timestamps are smoothed the same way: one jittery delta must not move the
+        // slots or flip the display gate for a single frame.
+        const bool stampUsable = timestampPerFrame >= 2'000'000 && timestampPerFrame <= 40'000'000;
+        if (stampUsable) {
+            m_timestamps[m_timestampSlot] = std::int64_t(timestampPerFrame);
+            m_timestampSlot = (m_timestampSlot + 1) % m_timestamps.size();
+            m_timestampCount = std::min(m_timestampCount + 1, m_timestamps.size());
+        } else {
+            m_timestampCount = 0;
+            m_timestampSlot = 0;
+        }
+        const auto stamped = median(m_timestamps, m_timestampCount);
         const bool arrivalUsable = observed >= 2'000'000 && observed <= 40'000'000;
-        const bool sourceUsable = timestampPerFrame >= 2'000'000 && timestampPerFrame <= 40'000'000
-            && (!arrivalUsable || (timestampPerFrame * 4 >= std::uint64_t(observed) * 3
-                                  && timestampPerFrame * 4 <= std::uint64_t(observed) * 5));
+        const bool sourceUsable = stampUsable
+            && (!arrivalUsable || (stamped * 4 >= observed * 3 && stamped * 4 <= observed * 5));
         if (sourceUsable) {
-            m_interval = timestampPerFrame;
+            m_interval = std::uint64_t(stamped);
             m_timingSource = TimingSource::SourceTimestamps;
         } else if (arrivalUsable) {
-            m_interval = observed;
+            m_interval = std::uint64_t(observed);
             m_timingSource = TimingSource::ArrivalCadence;
         } else {
             m_interval = 0;
@@ -102,23 +125,14 @@ public:
             return Result::Discontinuity;
         }
         if (m_interval < MinimumSourceInterval) return Result::SourceRateLimit;
-        // The display must show factor frames per source interval; 5 % tolerance for
-        // 59.94 Hz class sources on 120 Hz class displays.
         if (!std::isfinite(refreshRate)
-            || refreshRate < (double(m_factor) - 0.05) * 1e9 / double(m_interval))
+            || refreshRate < double(m_factor) * 1e9 / double(m_interval) * DisplayTolerance)
             return Result::DisplayTooSlow;
-        if (pending) {
-            // A source frame that lands before the previous pair finished presenting drops
-            // that pair's remaining schedule. Isolated collisions are decoder or network
-            // bursts; four within a second mean the presenter cannot keep up, so generation
-            // pauses for two seconds instead of queueing.
-            m_collisions[m_collisionSlot] = now;
-            m_collisionSlot = (m_collisionSlot + 1) % m_collisions.size();
-            m_collisionCount = std::min(m_collisionCount + 1, m_collisions.size());
-            if (m_collisionCount == m_collisions.size()
-                && now - *std::min_element(m_collisions.begin(), m_collisions.end()) <= 1'000'000'000)
-                m_cooldownUntil = now + 2'000'000'000;
-        }
+        // A source frame that lands before the previous pair finished presenting drops that
+        // pair's remaining schedule: decoder and network bursts are normal and the newest
+        // pair wins. Only a presenter that has stopped swapping is overload, and then
+        // generation pauses for two seconds instead of queueing.
+        if (pending && presenterStalled) m_cooldownUntil = now + 2'000'000'000;
         if (now < m_cooldownUntil) return Result::Overloaded;
         return Result::Interpolate;
     }
@@ -193,9 +207,9 @@ private:
     std::int64_t m_nextDue = 0;
     std::int64_t m_slot = 0;
     std::int64_t m_cooldownUntil = 0;
-    std::array<std::int64_t, 4> m_collisions{};
-    std::size_t m_collisionSlot = 0;
-    std::size_t m_collisionCount = 0;
+    std::array<std::int64_t, 8> m_timestamps{};
+    std::size_t m_timestampCount = 0;
+    std::size_t m_timestampSlot = 0;
     int m_factor = 2;
     int m_pendingCount = 0;
     int m_pendingIndex = 0;

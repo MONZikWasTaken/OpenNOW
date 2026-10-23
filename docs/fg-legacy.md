@@ -258,10 +258,17 @@ network burst skips one source frame. `StreamFramePacer` now treats a single ski
 as continuous once the cadence is known (the pair around it still interpolates, the
 generated frame stands in for the frame that was never shown, and the cadence estimate is
 per frame); two or more skipped frames, timestamp rewinds or jumps and arrival gaps above
-`max(50 ms, 2 × interval)` still re-warm. A source frame that lands while the previous pair
-is still presenting drops that pair's remaining schedule; only four such collisions within a
-second start the two-second overload cooldown. The stats overlay names the reason behind a
-`Discontinuity` (frames skipped, gap length, timestamp rewind or jump, no cadence).
+`max(50 ms, 2 × interval)` still re-warm. The source interval is the median of the last
+eight per-frame timestamp deltas (or arrival deltas when timestamps are unusable), so one
+jittery frame moves neither the slots nor the display gate, and the display gate uses the
+capability test's tolerance (`refresh ≥ N × fps × 0.975`) instead of a stricter one. A
+source frame that lands while the previous pair is still presenting drops that pair's
+remaining schedule: bursts are normal and the newest pair wins. Only a stalled presenter
+(nothing new swapped for `max(100 ms, 4 × interval)`, as the render callback reports) turns
+such a frame into the two-second overload cooldown. The stats overlay names the reason
+behind a `Discontinuity` (frames skipped, gap length, timestamp rewind or jump, no cadence),
+and the render callback writes every frame-generation status change with the pacer's
+numbers to `qt-native.log` (throttled to five lines a second).
 
 ## Out of scope for v1
 

@@ -56,21 +56,35 @@ private slots:
         pacer.source(1, 0, 0, 120);
         pacer.source(2, 16'666'667, 16'666'667, 120);
         pacer.midpoint(16'666'667);
-        // A single undrained pair is a burst: its schedule is dropped, generation continues.
-        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 120), Result::Interpolate);
+        // An undrained pair while the presenter has stopped swapping is overload: the
+        // schedule is dropped and generation cools down for two seconds.
+        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 120, 2, true), Result::Overloaded);
         QVERIFY(!pacer.pending());
-        pacer.midpoint(33'333'334);
-        QCOMPARE(pacer.source(4, 50'000'001, 50'000'001, 120), Result::Interpolate);
-        pacer.midpoint(50'000'001);
-        QCOMPARE(pacer.source(5, 66'666'668, 66'666'668, 120), Result::Interpolate);
-        pacer.midpoint(66'666'668);
-        // Four undrained pairs within a second: the presenter cannot keep up, cool down.
-        QCOMPARE(pacer.source(6, 83'333'335, 83'333'335, 120), Result::Overloaded);
-        QVERIFY(!pacer.pending());
-        QCOMPARE(pacer.source(7, 100'000'002, 100'000'002, 120), Result::Overloaded);
-        for (std::uint64_t frame = 8; frame < 130; ++frame)
+        QCOMPARE(pacer.source(4, 50'000'001, 50'000'001, 120), Result::Overloaded);
+        for (std::uint64_t frame = 5; frame < 130; ++frame)
             pacer.source(frame, (frame - 1) * 16'666'667, (frame - 1) * 16'666'667, 120);
         QCOMPARE(pacer.source(130, 129 * 16'666'667ULL, 129 * 16'666'667LL, 120), Result::Interpolate);
+    }
+
+    void burstsDropTheStaleScheduleWithoutCoolingDown()
+    {
+        // The presenter takes the latest decoded frame and the decoder delivers in bursts:
+        // a source frame that lands on an unfinished pair while frames still reach the
+        // display is not overload. The stale schedule is dropped and the new pair runs.
+        using Result = StreamFramePacer::Result;
+        StreamFramePacer pacer;
+        std::int64_t now = 0;
+        pacer.source(1, 0, now, 240);
+        for (std::uint64_t frame = 2; frame <= 60; ++frame) {
+            now += frame % 2 ? 31'333'334 : 2'000'000;
+            const auto result = pacer.source(frame, 0, now, 240);
+            if (frame >= 10) {
+                QCOMPARE(result, Result::Interpolate);
+                QCOMPARE(pacer.interval(), 16'666'667ULL);
+            }
+            pacer.midpoint(now);
+            QVERIFY(pacer.pending());
+        }
     }
 
     void oneSkippedSourceFrameKeepsGenerating()
@@ -192,16 +206,12 @@ private slots:
         StreamFramePacer pacer;
         pacer.source(1, 0, 0, 360, 4);
         pacer.source(2, 16'666'667, 16'666'667, 360, 4);
-        for (std::uint64_t frame = 3; frame <= 6; ++frame) {
-            const auto previous = std::int64_t(frame - 2) * 16'666'667;
-            pacer.generated(previous, 3);
-            QCOMPARE(pacer.takeNext(previous + 4'166'666, 360).kind, StreamFramePacer::Next::Kind::Generated);
-            QVERIFY(pacer.pending());
-            // Partially drained pairs count like undrained ones: the fourth in a second cools down.
-            QCOMPARE(pacer.source(frame, (frame - 1) * 16'666'667, (frame - 1) * 16'666'667, 360, 4),
-                     frame < 6 ? StreamFramePacer::Result::Interpolate : StreamFramePacer::Result::Overloaded);
-            QVERIFY(!pacer.pending());
-        }
+        pacer.generated(16'666'667, 3);
+        QCOMPARE(pacer.takeNext(16'666'667 + 4'166'666, 360).kind, StreamFramePacer::Next::Kind::Generated);
+        QVERIFY(pacer.pending());
+        // A partially drained pair counts like an undrained one once the presenter stalls.
+        QCOMPARE(pacer.source(3, 33'333'334, 33'333'334, 360, 4, true), StreamFramePacer::Result::Overloaded);
+        QVERIFY(!pacer.pending());
     }
 
     void highRefreshDoesNotCompressTheOriginalPair()
@@ -299,18 +309,16 @@ private slots:
                 QCOMPARE(pacer.interval(), 16'666'667ULL);
             }
         }
-        // One undrained pair after the bursts is dropped without a cooldown; sustained
-        // undrained pairs still surface the backpressure.
+        // An undrained pair after the bursts is dropped without a cooldown while the
+        // presenter keeps swapping; once it stalls the backpressure surfaces.
         pacer.midpoint(now);
         now += 31'333'334;
         QCOMPARE(pacer.source(31, 0, now, 165), Result::Interpolate);
         QVERIFY(!pacer.pending());
-        for (std::uint64_t frame = 32; frame <= 34; ++frame) {
-            pacer.midpoint(now);
-            now += frame % 2 ? 31'333'334 : 2'000'000;
-            QCOMPARE(pacer.source(frame, 0, now, 165), frame < 34 ? Result::Interpolate : Result::Overloaded);
-            QVERIFY(!pacer.pending());
-        }
+        pacer.midpoint(now);
+        now += 2'000'000;
+        QCOMPARE(pacer.source(32, 0, now, 165, 2, true), Result::Overloaded);
+        QVERIFY(!pacer.pending());
     }
 
     void simultaneousArrivalsCannotMasqueradeAsSlowerInput()
