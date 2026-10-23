@@ -173,7 +173,7 @@ all owned by `SettingsState` (QML) with the Rust core validating every value:
 | `frameGeneration` | `off`, `2x`, `3x`, `4x` | the level in multiplier mode; in the other modes it mirrors the derived factor |
 | `frameGenerationTargetFps` | 0 or 30…1000 | the requested output rate in target mode; the level is derived as `round(target / source fps)` clamped to 2…4. Display mode takes the largest allowed multiplier the display can show |
 | `frameGenerationDisplayHz` | 0 or 30…1000 | 0 uses the refresh rate of the display OpenNOW is on; otherwise a manual override for displays that report nothing or the wrong value |
-| `frameGenerationProfiles` | object, ≤ 64 entries | capability test results keyed by `engine|gpu|WxH|fps` (`fps` is `auto` when the stream rate is Auto) |
+| `frameGenerationProfiles` | object, ≤ 64 entries | capability test measurements keyed by `engine|gpu|WxH`; which levels fit is decided live from the selected frame rate and the current display |
 
 The source frame rate generation works against is the selected stream FPS, or for Auto the
 highest rate the membership allows at the selected resolution. The pacer takes the factor
@@ -198,9 +198,12 @@ around the blocking offscreen frame, and reports p50/p95/max plus the GPU name
 - Display: `refresh ≥ fps × N × 0.975` (skipped when the refresh is unknown).
 - Engine: `N ≤ engineMaxFactor`.
 
-The result is stored under the preset key, so changing resolution, frame rate or GPU makes
-frame generation unavailable again until that combination is tested. Until a passing
-profile exists the feature is off everywhere: the level and target controls are disabled,
+The measurement is stored under the engine, GPU and resolution; the cost per generated
+frame does not depend on the frame rate, so one test per resolution serves every rate.
+The decision is recomputed whenever the frame rate or the display changes, and the status
+names the reason when nothing fits: the display cannot show fps × 2, the GPU exceeds the
+budget, or the engine is midpoint-only. Until a measurement exists and at least one level
+fits, the feature is off everywhere: the level and target controls are disabled,
 and the stream surfaces ignore a stored level (`frameGenerationFactor()` returns 0 unless the
 profile allows the requested factor). Levels and target rates the profile does not allow are
 disabled with a hint, and a selection that the test rules out is reset to Off. The first-run

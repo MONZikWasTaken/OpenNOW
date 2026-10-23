@@ -32,12 +32,16 @@ QtObject {
         check(ShellStore.frameGenerationFactor() === 0, "an untested preset never generates frames")
         ShellStore.settings = Object.assign({}, ShellStore.settings, {frameGeneration: "off"})
         ShellStore.ensureFrameGenerationGpu()
+        // A measurement unlocks the levels that fit the selected rate on the display: at
+        // 60 FPS with 2.1 ms per frame every level fits the GPU, and a 180 Hz display shows
+        // 2x (120) and 3x (180) but not 4x (240).
         const profiles = {}
         profiles[ShellStore.settingsOwnerState.frameGenerationProfileKey()] = {
             engine: "motion", gpu: ShellStore.settingsOwnerState.frameGenerationGpu, width: 1920, height: 1080,
-            fps: 60, refreshHz: 240, p50Ms: 1.5, p95Ms: 2.1, maxMs: 3, frames: 180, gpuTimed: true,
-            allowed: [2, 3], testedAt: "acceptance", version: 1}
-        ShellStore.settings = Object.assign({}, ShellStore.settings, {frameGenerationProfiles: profiles})
+            fps: 60, refreshHz: 180, p50Ms: 1.5, p95Ms: 2.1, maxMs: 3, frames: 180, gpuTimed: true,
+            engineMaxFactor: 4, allowed: [2, 3], testedAt: "acceptance", version: 1}
+        ShellStore.settings = Object.assign({}, ShellStore.settings,
+            {frameGenerationProfiles: profiles, frameGenerationDisplayHz: 180})
         check(two.enabled && three.enabled, "a passing profile unlocks the allowed levels")
         check(!four.enabled, "levels the profile rules out stay locked")
         const desktop = desktopStream.createObject(parent)

@@ -1210,6 +1210,7 @@ fn normalize_frame_generation_profiles(values: &mut Map<String, Value>) {
                     "maxMs": number("maxMs", 0.0, 10_000.0),
                     "frames": number("frames", 0.0, 1_000_000.0) as i64,
                     "gpuTimed": profile.get("gpuTimed").and_then(Value::as_bool).unwrap_or(false),
+                    "engineMaxFactor": profile.get("engineMaxFactor").and_then(Value::as_i64).map(|factor| factor.clamp(2, 4)).unwrap_or(2),
                     "allowed": allowed,
                     "testedAt": text("testedAt"),
                     "version": profile.get("version").and_then(Value::as_i64).unwrap_or(1).clamp(1, 1_000),
@@ -3280,6 +3281,7 @@ mod tests {
         assert_eq!(profile["allowed"], json!([2, 4]));
         assert_eq!(profile["p95Ms"], json!(2.25));
         assert_eq!(profile["frames"], json!(180));
+        assert_eq!(profile["engineMaxFactor"], json!(2));
         assert!(profile.get("unexpected").is_none());
         let clamped = &profiles["clamped"];
         assert_eq!(clamped["fps"], json!(360));
