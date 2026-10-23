@@ -559,13 +559,29 @@ QtObject {
         return legacy ? profiles[legacy] : null
     }
     // {measured, allowed: [..], reasons: {"2": ""|"gpu"|"display"|"engine", ...}, costMs, budgetMs}
-    function frameGenerationVerdict() {
+    function frameGenerationVerdictFor(fps) {
         const profile = frameGenerationProfile()
         if (!profile) return {measured: false, allowed: [], reasons: {}, costMs: {}, budgetMs: 0}
         const verdict = FrameGenerationBenchmark.evaluate(Object.assign({ok: true, engineMaxFactor: 2}, profile),
-                                                          frameGenerationSourceFps(), frameGenerationDisplayHz())
+                                                          Number(fps), frameGenerationDisplayHz())
         verdict.measured = true
         return verdict
+    }
+    function frameGenerationVerdict() { return frameGenerationVerdictFor(frameGenerationSourceFps()) }
+    // One row per canonical stream rate: which levels fit on this GPU and display. The cost
+    // per generated frame is the same for every rate, so one measurement fills the table.
+    function frameGenerationMatrix() {
+        const locked = lockedFpsValues(frameGenerationResolution().text)
+        return canonicalFpsValues().map(fps => {
+            const verdict = frameGenerationVerdictFor(fps)
+            return {fps: fps, locked: locked.indexOf(fps) >= 0,
+                    cells: [2, 3, 4].map(factor => ({
+                        factor: factor, output: fps * factor,
+                        allowed: (verdict.allowed || []).indexOf(factor) >= 0,
+                        reason: String((verdict.reasons || {})[String(factor)] || ""),
+                        costMs: Number((verdict.costMs || {})[String(factor)] || 0),
+                        budgetMs: Number(verdict.budgetMs || 0)}))}
+        })
     }
     function frameGenerationAllowed(factor) {
         return (frameGenerationVerdict().allowed || []).indexOf(Number(factor)) >= 0

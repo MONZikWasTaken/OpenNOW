@@ -221,6 +221,18 @@ rate. Display mode needs nothing more; it reports which multiplier the display g
 needs changing when the platform reports nothing or the wrong value. The stats overlay
 badge reads `FRAME GEN N×` while generation actually runs.
 
+On desktop, **Run test** opens the capability dialog
+(`DesktopFrameGenerationTestDialog.qml`). It measures the GPU once when no profile exists
+and then shows every option at once instead of one verdict for the current preset: the
+detected display rate with its override, the stream frame rate chips (entitlement-locked
+rates dimmed), the mode chips, and a table with one row per stream rate and one cell per
+level (2×, 3×, 4×). Each cell shows the output rate and either a check mark or the reason
+it does not fit (display, GPU, engine); hovering a greyed cell gives the numbers. Clicking
+a row picks the stream rate, clicking a cell picks the level (or the target rate in Target
+FPS mode), and **Apply** writes `fps`, the mode and the level or target together.
+`--smoke-frame-generation-dialog` seeds a 2 ms / 240 Hz measurement and opens the dialog
+for screenshots. The console surface keeps the row controls.
+
 ## Out of scope for v1
 
 Multipliers above 2×, extrapolation, HDR sources, mobile targets and the f16

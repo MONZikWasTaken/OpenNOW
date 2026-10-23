@@ -10,6 +10,9 @@ Column {
     required property Component statsSettingsPageComponent
     property bool statisticsOpen: false
     Component.onCompleted: ShellStore.ensureFrameGenerationGpu()
+    // The smoke harness (--smoke-frame-generation-dialog) opens the dialog over a seeded measurement.
+    function openFrameGenerationDialog() { frameGenerationDialog.openFromSettings() }
+    DesktopFrameGenerationTestDialog { id: frameGenerationDialog }
 
     width: page.availableWidth; spacing: DesktopTokens.px(12)
     DesktopSettingsPanel {
@@ -169,7 +172,7 @@ Column {
                 compact: true
                 enabled: !FrameGenerationBenchmark.running
                 text: FrameGenerationBenchmark.running ? qsTr("Testing…") : qsTr("Run test")
-                onClicked: ShellStore.runFrameGenerationTest()
+                onClicked: frameGenerationDialog.openFromSettings()
             }
             AbstractButton {
                 id: framegenLink

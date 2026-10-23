@@ -1214,6 +1214,8 @@ QtObject {
     function frameGenerationFactor() { return settingsOwner.frameGenerationFactor() }
     function frameGenerationRequestedFactor() { return settingsOwner.frameGenerationRequestedFactor() }
     function frameGenerationMode() { return settingsOwner.frameGenerationMode() }
+    function frameGenerationMatrix() { return settingsOwner.frameGenerationMatrix() }
+    function frameGenerationVerdictFor(fps) { return settingsOwner.frameGenerationVerdictFor(fps) }
     function frameGenerationModes() { return settingsOwner.frameGenerationModes }
     function selectFrameGenerationMode(mode) { settingsOwner.selectFrameGenerationMode(mode) }
     function frameGenerationMultiplierDescription() { return settingsOwner.frameGenerationMultiplierDescription() }
