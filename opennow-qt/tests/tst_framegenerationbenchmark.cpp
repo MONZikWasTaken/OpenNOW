@@ -42,6 +42,17 @@ private slots:
         // Without a measurement nothing is allowed.
         verdict = FrameGenerationBenchmark::evaluate({}, 60, 240.0);
         QVERIFY(verdict.value(QStringLiteral("allowed")).toList().isEmpty());
+        // Measured per-level costs replace the (N - 1) extrapolation: the flow is shared,
+        // so 4x costs far less than three 2x passes here.
+        const QVariantMap measured{{QStringLiteral("ok"), true}, {QStringLiteral("p95Ms"), 2.5},
+                                   {QStringLiteral("p95Ms3"), 3.0}, {QStringLiteral("p95Ms4"), 3.5},
+                                   {QStringLiteral("engineMaxFactor"), 4}};
+        verdict = FrameGenerationBenchmark::evaluate(measured, 120, 480.0);
+        QCOMPARE(verdict.value(QStringLiteral("allowed")).toList(), (QVariantList{2, 3, 4}));
+        QCOMPARE(verdict.value(QStringLiteral("costMs")).toMap().value(QStringLiteral("4")).toDouble(), 3.5);
+        verdict = FrameGenerationBenchmark::evaluate(measured, 240, 960.0);
+        QCOMPARE(verdict.value(QStringLiteral("reasons")).toMap().value(QStringLiteral("4")).toString(),
+                 QStringLiteral("gpu"));
     }
 
     void measuresTheEngineOnThisGpu()
@@ -60,12 +71,16 @@ private slots:
         QVERIFY(result.value(QStringLiteral("p95Ms")).toDouble() >= result.value(QStringLiteral("p50Ms")).toDouble());
         QVERIFY(result.value(QStringLiteral("maxMs")).toDouble() >= result.value(QStringLiteral("p95Ms")).toDouble());
         QVERIFY(!result.value(QStringLiteral("gpu")).toString().isEmpty());
-        QCOMPARE(result.value(QStringLiteral("engineMaxFactor")).toInt(), 2);
+        QCOMPARE(result.value(QStringLiteral("engineMaxFactor")).toInt(), 4);
+        QVERIFY(result.value(QStringLiteral("p95Ms3")).toDouble() > 0.0);
+        QVERIFY(result.value(QStringLiteral("p95Ms4")).toDouble() > 0.0);
         QVERIFY(lastProgress > 0.0);
         qInfo() << "capability test:" << result.value(QStringLiteral("gpu")).toString()
                 << result.value(QStringLiteral("backend")).toString()
                 << "p50" << result.value(QStringLiteral("p50Ms")).toDouble() << "ms"
-                << "p95" << result.value(QStringLiteral("p95Ms")).toDouble() << "ms"
+                << "p95 2x" << result.value(QStringLiteral("p95Ms")).toDouble() << "ms"
+                << "3x" << result.value(QStringLiteral("p95Ms3")).toDouble() << "ms"
+                << "4x" << result.value(QStringLiteral("p95Ms4")).toDouble() << "ms"
                 << "gpuTimed" << result.value(QStringLiteral("gpuTimed")).toBool();
     }
 

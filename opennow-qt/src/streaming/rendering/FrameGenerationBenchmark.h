@@ -24,7 +24,8 @@ public:
     bool running() const { return m_running; }
     double progress() const { return m_progress; }
 
-    // request: {engine: "motion", width, height, factor (2..4), seconds (default 3)}.
+    // request: {engine: "motion", width, height, seconds (default 3)}; every level up to the
+    // engine maximum is timed in turn.
     // Returns false when a run is already in progress or the request is malformed.
     Q_INVOKABLE bool start(const QVariantMap &request);
     Q_INVOKABLE void cancel();
@@ -37,6 +38,10 @@ public:
     // Refresh rate in Hz of the screen `window` is on (0 when unknown). QML's Screen type
     // does not expose it, so the shell asks here.
     Q_INVOKABLE double displayRefreshRate(QObject *window) const;
+
+    // Highest factor the installed engine can synthesise. A property of the engine, not of
+    // a stored measurement: profiles saved by an older engine do not cap newer ones.
+    Q_INVOKABLE int engineMaxFactor() const;
 
     // Pure decision: which factors fit the measured cost for `fps` and `refreshHz`.
     // Result: {allowed: [..], budgetMs, costMs: {"2": .., "3": .., "4": ..},

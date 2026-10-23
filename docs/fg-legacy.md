@@ -180,29 +180,37 @@ highest rate the membership allows at the selected resolution. The pacer takes t
 and the effective refresh rate; the display gate scales with the factor (`refresh ≥
 (N − 0.05) × source`), and the former hard 120 FPS ceiling is gone: a 120 FPS stream on a
 360 Hz display may run 2×. Only a 4 ms source interval floor remains. The engine reports how
-many frames it can synthesise per pair (`generatedCount()`): the block-matching engine
-produces the midpoint only, so 3× and 4× need FG-Legacy, and the schedule follows the
-effective factor.
+many frames it synthesised for the pair (`generatedCount()`), and the schedule follows that
+effective factor. The block-matching engine computes the pair's flow once and runs its
+synthesis pass once per generated frame at `t = k / N` (previous frame warped by `t` of
+the forward flow, current frame by `1 − t` of the backward flow, blended `1 − t : t`), so
+2×, 3× and 4× all work; each generated frame has its own render target and uniform buffer
+so the passes of one pair never clobber each other's `t`.
 
 ### Capability test
 
 `FrameGenerationBenchmark` (context property) runs the engine offscreen on a private QRhi of
 the same backend, at the selected stream resolution, over a ring of procedural frames with
-texture, a flat band and an occluding block, for about three seconds. Per generated frame it
-records GPU time from `QRhi::Timestamps` (`lastCompletedGpuTime`), falling back to wall time
-around the blocking offscreen frame, and reports p50/p95/max plus the GPU name
-(`QRhiDriverInfo`). The decision is pure:
+texture, a flat band and an occluding block, for about three seconds: one second per level,
+2×, 3× and 4×. Per source frame it records GPU time from `QRhi::Timestamps`
+(`lastCompletedGpuTime`), falling back to wall time around the blocking offscreen frame,
+and reports p50/p95/max for 2× (`p95Ms`), the p95 per source frame at 3× and 4× (`p95Ms3`,
+`p95Ms4`) and the GPU name (`QRhiDriverInfo`). The decision is pure:
 
-- GPU: `p95 × (N − 1) ≤ 0.6 × (1000 / fps)` ms, leaving 40 % of each source interval for
-  decode, upscaling and presentation.
+- GPU: `cost(N) ≤ 0.6 × (1000 / fps)` ms, where `cost(N)` is the measured p95 per source
+  frame at that level (profiles from before the per-level measurement fall back to
+  `p95 × (N − 1)`), leaving 40 % of each source interval for decode, upscaling and
+  presentation.
 - Display: `refresh ≥ fps × N × 0.975` (skipped when the refresh is unknown).
-- Engine: `N ≤ engineMaxFactor`.
+- Engine: `N ≤ engineMaxFactor`, taken from the installed engine
+  (`FrameGenerationBenchmark.engineMaxFactor()`), not from the stored profile, so a
+  profile measured by an older engine does not cap a newer one.
 
-The measurement is stored under the engine, GPU and resolution; the cost per generated
-frame does not depend on the frame rate, so one test per resolution serves every rate.
+The measurement is stored under the engine, GPU and resolution; the cost per source frame
+does not depend on the frame rate, so one test per resolution serves every rate.
 The decision is recomputed whenever the frame rate or the display changes, and the status
 names the reason when nothing fits: the display cannot show fps × 2, the GPU exceeds the
-budget, or the engine is midpoint-only. Until a measurement exists and at least one level
+budget, or the engine cannot reach the level. Until a measurement exists and at least one level
 fits, the feature is off everywhere: the level and target controls are disabled,
 and the stream surfaces ignore a stored level (`frameGenerationFactor()` returns 0 unless the
 profile allows the requested factor). Levels and target rates the profile does not allow are

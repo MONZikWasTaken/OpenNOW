@@ -1208,6 +1208,8 @@ fn normalize_frame_generation_profiles(values: &mut Map<String, Value>) {
                     "refreshHz": number("refreshHz", 0.0, 1_000.0),
                     "p50Ms": number("p50Ms", 0.0, 10_000.0),
                     "p95Ms": number("p95Ms", 0.0, 10_000.0),
+                    "p95Ms3": number("p95Ms3", 0.0, 10_000.0),
+                    "p95Ms4": number("p95Ms4", 0.0, 10_000.0),
                     "maxMs": number("maxMs", 0.0, 10_000.0),
                     "frames": number("frames", 0.0, 1_000_000.0) as i64,
                     "gpuTimed": profile.get("gpuTimed").and_then(Value::as_bool).unwrap_or(false),

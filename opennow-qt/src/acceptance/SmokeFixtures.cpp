@@ -409,7 +409,8 @@ int AcceptanceSession::prepareWindow()
             const QVariantMap profile{{u"engine"_s, u"motion"_s},
                 {u"gpu"_s, state ? state->property("frameGenerationGpu").toString() : QString()},
                 {u"width"_s, size.value(u"width"_s, 1920)}, {u"height"_s, size.value(u"height"_s, 1080)},
-                {u"fps"_s, 60}, {u"refreshHz"_s, 240.0}, {u"p50Ms"_s, 1.6}, {u"p95Ms"_s, 2.0}, {u"maxMs"_s, 3.1},
+                {u"fps"_s, 60}, {u"refreshHz"_s, 240.0}, {u"p50Ms"_s, 1.6}, {u"p95Ms"_s, 2.0},
+                {u"p95Ms3"_s, 2.6}, {u"p95Ms4"_s, 3.2}, {u"maxMs"_s, 3.1},
                 {u"frames"_s, 180}, {u"gpuTimed"_s, false}, {u"engineMaxFactor"_s, 4},
                 {u"allowed"_s, QVariantList{2}}, {u"testedAt"_s, u"smoke"_s}, {u"version"_s, 1}};
             const QVariantMap values{{u"frameGenerationProfiles"_s, QVariantMap{{key.toString(), profile}}},

@@ -562,14 +562,17 @@ QtObject {
     function frameGenerationVerdictFor(fps) {
         const profile = frameGenerationProfile()
         if (!profile) return {measured: false, allowed: [], reasons: {}, costMs: {}, budgetMs: 0}
-        const verdict = FrameGenerationBenchmark.evaluate(Object.assign({ok: true, engineMaxFactor: 2}, profile),
-                                                          Number(fps), frameGenerationDisplayHz())
+        // The engine maximum belongs to the installed engine: a profile measured by an older
+        // engine keeps its 2x cost and extrapolates the levels it never timed.
+        const verdict = FrameGenerationBenchmark.evaluate(
+            Object.assign({ok: true}, profile, {engineMaxFactor: FrameGenerationBenchmark.engineMaxFactor()}),
+            Number(fps), frameGenerationDisplayHz())
         verdict.measured = true
         return verdict
     }
     function frameGenerationVerdict() { return frameGenerationVerdictFor(frameGenerationSourceFps()) }
     // One row per canonical stream rate: which levels fit on this GPU and display. The cost
-    // per generated frame is the same for every rate, so one measurement fills the table.
+    // per source frame is the same for every rate, so one measurement fills the table.
     function frameGenerationMatrix() {
         const locked = lockedFpsValues(frameGenerationResolution().text)
         return canonicalFpsValues().map(fps => {
@@ -695,6 +698,16 @@ QtObject {
         if (factor < 2) return qsTr("On · no level fits this frame rate")
         return qsTr("%1× · %2 FPS").arg(factor).arg(frameGenerationSourceFps() * factor)
     }
+    // "2× 0.8 ms · 3× 1.1 ms · 4× 1.4 ms": p95 GPU time per source frame at each measured level.
+    function frameGenerationCostText(profile) {
+        const costs = {2: profile.p95Ms, 3: profile.p95Ms3, 4: profile.p95Ms4}
+        const parts = []
+        for (const factor of [2, 3, 4]) {
+            const cost = Number(costs[factor] || 0)
+            if (cost > 0) parts.push(qsTr("%1× %2 ms").arg(factor).arg(cost.toFixed(1)))
+        }
+        return parts.join(" · ")
+    }
     // Status of the capability test for the current preset (its own settings row).
     function frameGenerationTestDescription() {
         const resolution = frameGenerationResolution().text.replace("x", "×")
@@ -711,8 +724,8 @@ QtObject {
         const p95 = Number(profile.p95Ms || 0).toFixed(1)
         const allowed = verdict.allowed || []
         if (allowed.length)
-            return qsTr("Tested on %1: %2 ms per generated frame, up to %3× at %4 FPS on this %5 Hz display.")
-                .arg(profile.gpu || frameGenerationGpu).arg(p95).arg(Math.max.apply(null, allowed)).arg(source).arg(display)
+            return qsTr("Tested on %1 (%2 per source frame): up to %3× at %4 FPS on this %5 Hz display.")
+                .arg(profile.gpu || frameGenerationGpu).arg(frameGenerationCostText(profile)).arg(Math.max.apply(null, allowed)).arg(source).arg(display)
         // Nothing fits: name the real reason for 2x, the cheapest level.
         switch (String((verdict.reasons || {})["2"] || "")) {
         case "display":
@@ -720,11 +733,11 @@ QtObject {
                 ? qsTr("Your %1 Hz display cannot show %2 FPS (2× of the %3 FPS stream). Lower the stream frame rate or move OpenNOW to a faster display.").arg(display).arg(source * 2).arg(source)
                 : qsTr("Display refresh unknown. Set the override under Advanced.")
         case "gpu":
-            return qsTr("Too slow on this GPU: %1 ms per generated frame, budget %2 ms at %3 FPS.")
+            return qsTr("Too slow on this GPU: %1 ms per source frame at 2×, budget %2 ms at %3 FPS.")
                 .arg(p95).arg(Number(verdict.budgetMs || 0).toFixed(1)).arg(source)
         default:
-            return qsTr("Tested on %1 (%2 ms per generated frame), but no level fits %3 FPS right now.")
-                .arg(profile.gpu || frameGenerationGpu).arg(p95).arg(source)
+            return qsTr("Tested on %1 (%2 per source frame), but no level fits %3 FPS right now.")
+                .arg(profile.gpu || frameGenerationGpu).arg(frameGenerationCostText(profile)).arg(source)
         }
     }
     // Description of the mode control: what will run for the selected mode.
@@ -791,6 +804,7 @@ QtObject {
                 engine: "motion", gpu: String(result.gpu || root.frameGenerationGpu),
                 width: result.width, height: result.height, fps: source, refreshHz: display,
                 p50Ms: result.p50Ms, p95Ms: result.p95Ms, maxMs: result.maxMs, frames: result.frames,
+                p95Ms3: Number(result.p95Ms3 || 0), p95Ms4: Number(result.p95Ms4 || 0),
                 gpuTimed: result.gpuTimed === true, engineMaxFactor: Number(result.engineMaxFactor || 2),
                 allowed: verdict.allowed, testedAt: result.testedAt, version: 1
             }

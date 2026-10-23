@@ -5,6 +5,7 @@
 #include <QTest>
 #include <rhi/qrhi.h>
 #include <rhi/qrhi_platform.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -37,6 +38,33 @@ private:
             }
         }
         return image;
+    }
+
+    bool ingestAt(StreamFrameInterpolator &interpolator, QRhiTexture *source, const QImage &image, int factor)
+    {
+        QRhiCommandBuffer *cb = nullptr;
+        if (m_rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess) return false;
+        auto *updates = m_rhi->nextResourceUpdateBatch();
+        updates->uploadTexture(source, image);
+        cb->resourceUpdate(updates);
+        const bool ingested = interpolator.ingest(cb, source, factor);
+        return m_rhi->endOffscreenFrame() == QRhi::FrameOpSuccess && ingested;
+    }
+
+    QImage readBack(QRhiTexture *texture)
+    {
+        if (!texture) return {};
+        QRhiCommandBuffer *cb = nullptr;
+        if (m_rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess) return {};
+        QRhiReadbackResult result;
+        bool completed = false;
+        result.completed = [&completed] { completed = true; };
+        auto *readback = m_rhi->nextResourceUpdateBatch();
+        readback->readBackTexture(QRhiReadbackDescription(texture), &result);
+        cb->resourceUpdate(readback);
+        if (m_rhi->endOffscreenFrame() != QRhi::FrameOpSuccess || !completed) return {};
+        return QImage(reinterpret_cast<const uchar *>(result.data.constData()),
+                      result.pixelSize.width(), result.pixelSize.height(), QImage::Format_RGBA8888).copy();
     }
 
     QImage submit(StreamFrameInterpolator &interpolator, QRhiTexture *source,
@@ -161,6 +189,51 @@ private slots:
         const QImage third = submit(interpolator, source.get(), scene(size, translation * 2), true);
         QVERIFY(!third.isNull());
         QVERIFY(error(third, scene(size, translation * 3 / 2)) < actualError * 0.45);
+    }
+
+    void higherFactorsMoveInEvenSteps_data()
+    {
+        QTest::addColumn<int>("factor");
+        QTest::newRow("three-times") << 3;
+        QTest::newRow("four-times") << 4;
+    }
+
+    void higherFactorsMoveInEvenSteps()
+    {
+        // 3x and 4x share the pair's flow and synthesise one frame per t = k / N; each
+        // must sit at its own fraction of the motion rather than repeat a source frame.
+        QFETCH(int, factor);
+        const int translation = 24;
+        const QSize size(320, 224);
+        auto source = std::unique_ptr<QRhiTexture>(m_rhi->newTexture(QRhiTexture::RGBA8, size));
+        QVERIFY(source->create());
+        StreamFrameInterpolator interpolator;
+        QVERIFY(interpolator.initialize(m_rhi.get()));
+        const QImage previous = scene(size, 0);
+        const QImage current = scene(size, translation);
+        QVERIFY(ingestAt(interpolator, source.get(), previous, factor));
+        QCOMPARE(interpolator.generatedCount(), 0);
+        QVERIFY(ingestAt(interpolator, source.get(), current, factor));
+        QCOMPARE(interpolator.generatedCount(), factor - 1);
+        QVERIFY(!interpolator.generatedTexture(0));
+        QVERIFY(!interpolator.generatedTexture(factor));
+        QVERIFY(interpolator.midpointTexture());
+        for (int k = 1; k < factor; ++k) {
+            const QImage generated = readBack(interpolator.generatedTexture(k));
+            QVERIFY(!generated.isNull());
+            const QImage expected = scene(size, translation * k / factor);
+            const double generatedError = error(generated, expected);
+            const double nearestSource = std::min(error(previous, expected), error(current, expected));
+            qInfo() << "factor" << factor << "frame" << k << "generated/nearest-source errors:"
+                    << generatedError << nearestSource;
+            QVERIFY2(generatedError < nearestSource * 0.5,
+                     "Each generated frame must sit at its own fraction of the motion");
+        }
+        // Dropping back to 2x keeps the pair contract.
+        QVERIFY(ingestAt(interpolator, source.get(), scene(size, translation * 2), 2));
+        QCOMPARE(interpolator.generatedCount(), 1);
+        const QImage expected = scene(size, translation * 3 / 2);
+        QVERIFY(error(readBack(interpolator.generatedTexture(1)), expected) < error(current, expected) * 0.45);
     }
 
     void detailedTextureProducesIntermediateMotion_data()

@@ -80,8 +80,8 @@ Dialog {
         if (FrameGenerationBenchmark.running) return qsTr("Measuring this GPU at %1…").arg(resolutionText())
         if (fg.frameGenerationTestError !== "") return qsTr("Capability test failed: %1").arg(fg.frameGenerationTestError)
         if (!measured) return qsTr("Not measured yet.")
-        return qsTr("%1 · %2 · %3 ms per generated frame (p95)")
-            .arg(profile.gpu || fg.frameGenerationGpu).arg(resolutionText()).arg(Number(profile.p95Ms || 0).toFixed(1))
+        return qsTr("%1 · %2 · %3 (p95 per source frame)")
+            .arg(profile.gpu || fg.frameGenerationGpu).arg(resolutionText()).arg(fg.frameGenerationCostText(profile))
     }
     function apply() {
         const settings = ShellStore.settings || ({})

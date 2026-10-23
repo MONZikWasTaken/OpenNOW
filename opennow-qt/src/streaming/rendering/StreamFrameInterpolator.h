@@ -14,8 +14,8 @@ public:
     StreamFrameInterpolator(const StreamFrameInterpolator &) = delete;
     StreamFrameInterpolator &operator=(const StreamFrameInterpolator &) = delete;
 
-    // This engine synthesises the t = 0.5 midpoint only; higher factors fall back to it.
-    static constexpr int MaximumFactor = 2;
+    // Generated frames per pair: N - 1 frames at t = k / N for a factor N up to this.
+    static constexpr int MaximumFactor = 4;
 
     bool initialize(QRhi *rhi);
     bool ingest(QRhiCommandBuffer *cb, QRhiTexture *source, int factor = 2);

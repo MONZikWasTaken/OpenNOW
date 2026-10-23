@@ -165,6 +165,11 @@ double FrameGenerationBenchmark::displayRefreshRate(QObject *window) const
     return screen ? screen->refreshRate() : 0.0;
 }
 
+int FrameGenerationBenchmark::engineMaxFactor() const
+{
+    return StreamFrameInterpolator::MaximumFactor;
+}
+
 QString FrameGenerationBenchmark::gpuName()
 {
     if (!m_gpuNameResolved) {
@@ -189,7 +194,6 @@ QVariantMap FrameGenerationBenchmark::measure(const QVariantMap &request,
 {
     const int width = request.value(QStringLiteral("width")).toInt();
     const int height = request.value(QStringLiteral("height")).toInt();
-    const int factor = std::clamp(request.value(QStringLiteral("factor"), 2).toInt(), 2, 4);
     const double seconds = std::clamp(request.value(QStringLiteral("seconds"), 3.0).toDouble(), 0.5, 15.0);
     const QString engineName = request.value(QStringLiteral("engine"), QStringLiteral("motion")).toString();
 
@@ -221,41 +225,50 @@ QVariantMap FrameGenerationBenchmark::measure(const QVariantMap &request,
     // (D3D11 returns 0); endOffscreenFrame() blocks until the GPU is done, so the wall
     // time around it is a conservative per-frame cost on those.
     const bool timestamps = rhi->isFeatureSupported(QRhi::Timestamps);
-    std::vector<double> samples;
-    samples.reserve(kMaximumFrames);
-    int gpuTimedSamples = 0;
+    // Every level is timed on its own: one source frame costs the shared flow plus one
+    // synthesis pass per generated frame, so 3x and 4x are measured, not extrapolated.
+    constexpr int kFactors = StreamFrameInterpolator::MaximumFactor - 1;
+    std::array<std::vector<double>, kFactors> samples;
+    std::array<int, kFactors> gpuTimedSamples{};
+    const double secondsPerFactor = seconds / double(kFactors);
     QElapsedTimer total;
     total.start();
-    int frames = 0;
-    for (; frames < kMaximumFrames; ++frames) {
-        if (cancelled && cancelled->load()) return failure(QStringLiteral("cancelled"));
-        QRhiCommandBuffer *cb = nullptr;
-        if (rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
-            return failure(QStringLiteral("Could not begin an offscreen GPU frame"));
-        QElapsedTimer frame;
-        frame.start();
-        const bool ingested = engine.ingest(cb, sources[frames % kSourceFrames].get(), factor);
-        rhi->endOffscreenFrame();
-        const double wallMs = double(frame.nsecsElapsed()) / 1e6;
-        if (!ingested) return failure(QStringLiteral("The frame-generation engine rejected the test frames"));
-        double ms = timestamps ? cb->lastCompletedGpuTime() * 1000.0 : 0.0;
-        const bool fromGpu = ms > 0.0;
-        if (!fromGpu) ms = wallMs;
-        if (frames >= kWarmupFrames && ms > 0.0) {
-            samples.push_back(ms);
-            if (fromGpu) ++gpuTimedSamples;
+    for (int factor = 2; factor <= StreamFrameInterpolator::MaximumFactor; ++factor) {
+        auto &current = samples[factor - 2];
+        current.reserve(kMaximumFrames);
+        QElapsedTimer phase;
+        phase.start();
+        for (int frames = 0; frames < kMaximumFrames; ++frames) {
+            if (cancelled && cancelled->load()) return failure(QStringLiteral("cancelled"));
+            QRhiCommandBuffer *cb = nullptr;
+            if (rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
+                return failure(QStringLiteral("Could not begin an offscreen GPU frame"));
+            QElapsedTimer frame;
+            frame.start();
+            const bool ingested = engine.ingest(cb, sources[frames % kSourceFrames].get(), factor);
+            rhi->endOffscreenFrame();
+            const double wallMs = double(frame.nsecsElapsed()) / 1e6;
+            if (!ingested) return failure(QStringLiteral("The frame-generation engine rejected the test frames"));
+            double ms = timestamps ? cb->lastCompletedGpuTime() * 1000.0 : 0.0;
+            const bool fromGpu = ms > 0.0;
+            if (!fromGpu) ms = wallMs;
+            if (frames >= kWarmupFrames && ms > 0.0) {
+                current.push_back(ms);
+                if (fromGpu) ++gpuTimedSamples[factor - 2];
+            }
+            const double elapsed = double(phase.elapsed()) / 1000.0;
+            if (progress) progress(std::min(1.0, (double(factor - 2) + std::min(1.0, elapsed / secondsPerFactor)) / kFactors));
+            if (elapsed >= secondsPerFactor && current.size() >= 30) break;
         }
-        const double elapsed = double(total.elapsed()) / 1000.0;
-        if (progress) progress(std::min(1.0, elapsed / seconds));
-        if (elapsed >= seconds && samples.size() >= 30) break;
+        if (current.size() < 10) return failure(QStringLiteral("Not enough GPU samples"));
     }
-    if (samples.size() < 10) return failure(QStringLiteral("Not enough GPU samples"));
-    const bool gpuTimed = gpuTimedSamples == int(samples.size());
     engine.release();
 
+    const auto &two = samples[0];
+    const bool gpuTimed = gpuTimedSamples[0] == int(two.size());
     double mean = 0.0;
-    for (const double value : samples) mean += value;
-    mean /= double(samples.size());
+    for (const double value : two) mean += value;
+    mean /= double(two.size());
     QVariantMap result;
     result.insert(QStringLiteral("ok"), true);
     result.insert(QStringLiteral("engine"), engineName);
@@ -264,13 +277,16 @@ QVariantMap FrameGenerationBenchmark::measure(const QVariantMap &request,
     result.insert(QStringLiteral("gpu"), QString::fromUtf8(rhi->driverInfo().deviceName));
     result.insert(QStringLiteral("width"), width);
     result.insert(QStringLiteral("height"), height);
-    result.insert(QStringLiteral("factor"), factor);
-    result.insert(QStringLiteral("frames"), int(samples.size()));
+    result.insert(QStringLiteral("frames"), int(two.size()));
     result.insert(QStringLiteral("gpuTimed"), gpuTimed);
     result.insert(QStringLiteral("meanMs"), mean);
-    result.insert(QStringLiteral("p50Ms"), percentile(samples, 0.5));
-    result.insert(QStringLiteral("p95Ms"), percentile(samples, 0.95));
-    result.insert(QStringLiteral("maxMs"), *std::max_element(samples.begin(), samples.end()));
+    result.insert(QStringLiteral("p50Ms"), percentile(two, 0.5));
+    // p95Ms is the 2x cost (one generated frame per source frame); p95Ms3 and p95Ms4 the
+    // cost per source frame at 3x and 4x.
+    result.insert(QStringLiteral("p95Ms"), percentile(two, 0.95));
+    result.insert(QStringLiteral("p95Ms3"), percentile(samples[1], 0.95));
+    result.insert(QStringLiteral("p95Ms4"), percentile(samples[2], 0.95));
+    result.insert(QStringLiteral("maxMs"), *std::max_element(two.begin(), two.end()));
     result.insert(QStringLiteral("testedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
     result.insert(QStringLiteral("version"), 1);
     return result;
@@ -285,9 +301,11 @@ QVariantMap FrameGenerationBenchmark::evaluate(const QVariantMap &measurement, i
     QVariantList allowed;
     QVariantMap costs, reasons;
     for (int factor = 2; factor <= 4; ++factor) {
-        // One generated frame costs one engine pass; the engine reports the cost of a
-        // full pass, so N-1 generated frames cost (N-1) passes per source interval.
-        const double cost = p95 * double(factor - 1);
+        // The measured cost per source frame at this level when the profile has it; older
+        // profiles only know the 2x pass and scale it by the generated frames.
+        const double measured = factor == 2 ? p95
+            : measurement.value(QStringLiteral("p95Ms%1").arg(factor)).toDouble();
+        const double cost = measured > 0.0 ? measured : p95 * double(factor - 1);
         costs.insert(QString::number(factor), cost);
         QString reason;
         if (factor > engineMax) reason = QStringLiteral("engine");
