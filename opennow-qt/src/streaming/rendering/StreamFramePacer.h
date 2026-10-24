@@ -30,10 +30,11 @@ public:
     // Below this source interval (250 FPS) generation is pointless and the pacing
     // noise exceeds the slot width.
     static constexpr std::uint64_t MinimumSourceInterval = 4'000'000;
-    // The display must show factor frames per source interval; the same tolerance as the
-    // capability test, so 59.94 Hz class sources run on 120 Hz class displays and 60 FPS x 4
-    // on panels that report 239.96 Hz.
-    static constexpr double DisplayTolerance = 0.975;
+    // The display must show about factor frames per source interval. Cloud streams labelled
+    // 60 FPS often run at 61-62 FPS, so 4x asks for ~247 Hz on a 240 Hz panel; up to 5 %
+    // overshoot is absorbed by the presenter, which waits for each swap and drops the last
+    // slot of a pair when the next source frame arrives.
+    static constexpr double DisplayTolerance = 0.95;
 
     // `presenterStalled`: nothing new has reached the display for a while. Only then does a
     // source frame that lands on an unfinished pair count as overload; otherwise it is a
@@ -125,9 +126,14 @@ public:
             return Result::Discontinuity;
         }
         if (m_interval < MinimumSourceInterval) return Result::SourceRateLimit;
-        if (!std::isfinite(refreshRate)
-            || refreshRate < double(m_factor) * 1e9 / double(m_interval) * DisplayTolerance)
-            return Result::DisplayTooSlow;
+        // A display slower than the requested factor needs lowers the factor for this pair
+        // instead of switching generation off; only when even 2x does not fit is it too slow.
+        const auto fits = [&](int factor) {
+            return std::isfinite(refreshRate)
+                && refreshRate >= double(factor) * 1e9 / double(m_interval) * DisplayTolerance;
+        };
+        while (m_factor > MinimumFactor && !fits(m_factor)) --m_factor;
+        if (!fits(m_factor)) return Result::DisplayTooSlow;
         // A source frame that lands before the previous pair finished presenting drops that
         // pair's remaining schedule: decoder and network bursts are normal and the newest
         // pair wins. Only a presenter that has stopped swapping is overload, and then

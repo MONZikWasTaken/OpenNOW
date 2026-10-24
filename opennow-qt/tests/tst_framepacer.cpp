@@ -149,16 +149,25 @@ private slots:
     void displayRequirementScalesWithTheFactor()
     {
         using Result = StreamFramePacer::Result;
-        // 60 FPS source: 2x needs ~117 Hz, 3x ~177 Hz, 4x ~237 Hz.
-        for (const auto [factor, refresh, expected] : {
-                 std::tuple{2, 120.0, Result::Interpolate}, std::tuple{3, 120.0, Result::DisplayTooSlow},
-                 std::tuple{3, 180.0, Result::Interpolate}, std::tuple{4, 180.0, Result::DisplayTooSlow},
-                 std::tuple{4, 240.0, Result::Interpolate}, std::tuple{4, 239.0, Result::Interpolate}}) {
+        // 60 FPS source: 2x needs ~114 Hz, 3x ~171 Hz, 4x ~228 Hz. A slower display lowers
+        // the factor for the pair instead of switching generation off.
+        for (const auto [factor, refresh, expected, effective] : {
+                 std::tuple{2, 120.0, Result::Interpolate, 2}, std::tuple{3, 120.0, Result::Interpolate, 2},
+                 std::tuple{3, 180.0, Result::Interpolate, 3}, std::tuple{4, 180.0, Result::Interpolate, 3},
+                 std::tuple{4, 240.0, Result::Interpolate, 4}, std::tuple{4, 239.0, Result::Interpolate, 4},
+                 std::tuple{2, 100.0, Result::DisplayTooSlow, 2}}) {
             StreamFramePacer pacer;
             pacer.source(1, 0, 0, refresh, factor);
             QCOMPARE(pacer.source(2, 16'666'667, 16'666'667, refresh, factor), expected);
-            QCOMPARE(pacer.factor(), factor);
+            QCOMPARE(pacer.factor(), effective);
         }
+        // A cloud "60 FPS" stream at 61.7 FPS keeps 4x on a 240 Hz panel.
+        StreamFramePacer cloud;
+        cloud.source(1, 0, 0, 240.0, 4);
+        for (std::uint64_t frame = 2; frame <= 20; ++frame)
+            QCOMPARE(cloud.source(frame, (frame - 1) * 16'200'000, std::int64_t(frame - 1) * 16'200'000, 240.0, 4),
+                     Result::Interpolate);
+        QCOMPARE(cloud.factor(), 4);
     }
 
     void schedulesEverySlotOfAThreeAndFourTimesPair()

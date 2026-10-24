@@ -248,6 +248,11 @@ private:
     int m_upscalingDenoise = 0;
     QTimer m_frameStatsTimer;
     QTimer m_swapStatsTimer;
+    // Measures how late the GUI thread runs a 10 ms timer while a stream is shown: frames
+    // are requested from the GUI thread, so a GUI stall is a presentation stall.
+    QTimer m_guiStallProbe;
+    qint64 m_guiStallLastNs = 0;
+    qint64 m_guiStallLoggedNs = 0;
     QString m_swapGateSource;
     QMetaObject::Connection m_frameSwapConnection;
     QMetaObject::Connection m_frameUpdateConnection;

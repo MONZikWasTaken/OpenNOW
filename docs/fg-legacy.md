@@ -260,15 +260,22 @@ generated frame stands in for the frame that was never shown, and the cadence es
 per frame); two or more skipped frames, timestamp rewinds or jumps and arrival gaps above
 `max(50 ms, 2 × interval)` still re-warm. The source interval is the median of the last
 eight per-frame timestamp deltas (or arrival deltas when timestamps are unusable), so one
-jittery frame moves neither the slots nor the display gate, and the display gate uses the
-capability test's tolerance (`refresh ≥ N × fps × 0.975`) instead of a stricter one. A
+jittery frame moves neither the slots nor the display gate. Cloud streams labelled 60 FPS
+often run at 61–62 FPS (a 16.2 ms interval), so 4× asks for about 247 Hz on a 240 Hz panel:
+the gate accepts up to 5 % overshoot (`refresh ≥ N × fps × 0.95`) and, when the display is
+still too slow, lowers the factor for that pair instead of switching generation off; only
+when even 2× does not fit is the status `display-refresh`. A
 source frame that lands while the previous pair is still presenting drops that pair's
 remaining schedule: bursts are normal and the newest pair wins. Only a stalled presenter
 (nothing new swapped for `max(100 ms, 4 × interval)`, as the render callback reports) turns
 such a frame into the two-second overload cooldown. The stats overlay names the reason
 behind a `Discontinuity` (frames skipped, gap length, timestamp rewind or jump, no cadence),
 and the render callback writes every frame-generation status change with the pacer's
-numbers to `qt-native.log` (throttled to five lines a second).
+numbers to `qt-native.log` (throttled to five lines a second). `StreamVideoItem` also runs
+a 10 ms probe on the GUI thread and logs `gui-stall ms=…` whenever it runs 35 ms or more
+late: frames are requested from the GUI thread, so a GUI stall drops source frames (seen
+live as a `sequence-gap` of three frames once a second in a Debug build while the stats
+overlay was open). Judge smoothness on a Release build.
 
 ## Out of scope for v1
 
