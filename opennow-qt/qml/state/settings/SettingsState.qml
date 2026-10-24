@@ -740,6 +740,10 @@ QtObject {
                 .arg(profile.gpu || frameGenerationGpu).arg(frameGenerationCostText(profile)).arg(source)
         }
     }
+    // Shown wherever frame generation is offered while FG-Legacy is the engine.
+    function frameGenerationEngineNotice() {
+        return qsTr("Experimental: the current engine was never designed for games, so expect strong artifacts on thin edges and fast motion. The upcoming FlyHigh model fixes this.")
+    }
     // Description of the mode control: what will run for the selected mode.
     function frameGenerationDescription() {
         if (!frameGenerationUnlocked())

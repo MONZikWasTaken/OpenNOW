@@ -316,3 +316,8 @@ void StreamFrameInterpolator::release()
 {
     m_state.reset();
 }
+
+QRhiTexture *StreamFrameInterpolator::previousTexture() const
+{
+    return hasPair() ? m_state->history[1 - m_state->current].texture.get() : nullptr;
+}

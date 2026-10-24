@@ -200,8 +200,9 @@ Column {
         }
         DesktopSettingsRow {
             objectName: "frameGenerationRow"
-            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Frame generation (Experimental)")
-            description: ShellStore.frameGenerationDescription()
+            width: parent.width; paperStyle: true; glyph: "speed"; title: qsTr("Frame generation")
+            badge: qsTr("Experimental")
+            description: ShellStore.frameGenerationDescription() + "\n" + ShellStore.frameGenerationEngineNotice()
             enabled: ShellStore.frameGenerationUnlocked()
             opacity: enabled ? 1 : 0.45
             DesktopSettingsSegmented {

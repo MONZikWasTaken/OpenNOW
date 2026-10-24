@@ -191,6 +191,38 @@ private slots:
         QVERIFY(error(third, scene(size, translation * 3 / 2)) < actualError * 0.45);
     }
 
+    // Diagnostic: OPENNOW_FG_DUMP=<previous.png>;<current.png>;<outdir>;<factor> runs the
+    // engine on two real frames and writes every generated frame as PNG. Skipped otherwise.
+    void dumpRealFramePair()
+    {
+        const auto spec = qEnvironmentVariable("OPENNOW_FG_DUMP").split(QLatin1Char(';'));
+        if (spec.size() != 4) QSKIP("OPENNOW_FG_DUMP not set");
+        const QImage previous = QImage(spec[0]).convertToFormat(QImage::Format_RGBA8888);
+        const QImage current = QImage(spec[1]).convertToFormat(QImage::Format_RGBA8888);
+        QVERIFY(!previous.isNull() && previous.size() == current.size());
+        const int factor = spec[3].toInt();
+        auto source = std::unique_ptr<QRhiTexture>(m_rhi->newTexture(QRhiTexture::RGBA8, previous.size()));
+        QVERIFY(source->create());
+        StreamFrameInterpolator interpolator;
+        QVERIFY(interpolator.initialize(m_rhi.get()));
+        QVERIFY(ingestAt(interpolator, source.get(), previous, factor));
+        QVERIFY(ingestAt(interpolator, source.get(), current, factor));
+        for (int k = 1; k < factor; ++k) {
+            const QImage generated = readBack(interpolator.generatedTexture(k));
+            QVERIFY(!generated.isNull());
+            QVERIFY(generated.save(spec[2] + QStringLiteral("/generated-%1.png").arg(k)));
+            double sum[2] = {0, 0};
+            for (int y = 0; y < generated.height(); ++y)
+                for (int x = 0; x < generated.width() * 4; x += 4) {
+                    sum[0] += generated.constScanLine(y)[x] + generated.constScanLine(y)[x + 1] + generated.constScanLine(y)[x + 2];
+                    sum[1] += current.constScanLine(y)[x] + current.constScanLine(y)[x + 1] + current.constScanLine(y)[x + 2];
+                }
+            qInfo() << "frame" << k << "mean brightness generated/current:"
+                    << sum[0] / (3.0 * generated.width() * generated.height())
+                    << sum[1] / (3.0 * current.width() * current.height());
+        }
+    }
+
     void higherFactorsMoveInEvenSteps_data()
     {
         QTest::addColumn<int>("factor");

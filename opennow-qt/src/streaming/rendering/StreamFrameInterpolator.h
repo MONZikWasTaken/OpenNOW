@@ -20,6 +20,8 @@ public:
     bool initialize(QRhi *rhi);
     bool ingest(QRhiCommandBuffer *cb, QRhiTexture *source, int factor = 2);
     QRhiTexture *currentTexture() const;
+    // The earlier frame of the current pair (diagnostics).
+    QRhiTexture *previousTexture() const;
     QRhiTexture *midpointTexture() const;
     // Generated frames available for the current pair (1-based index between the two
     // source frames, in presentation order).

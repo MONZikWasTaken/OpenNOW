@@ -1218,6 +1218,7 @@ QtObject {
     function toggleFrameGeneration() { settingsOwner.toggleFrameGeneration() }
     function frameGenerationQuickText() { return settingsOwner.frameGenerationQuickText() }
     function frameGenerationQuickVisible() { return settingsOwner.frameGenerationQuickVisible() }
+    function frameGenerationEngineNotice() { return settingsOwner.frameGenerationEngineNotice() }
     function frameGenerationVerdictFor(fps) { return settingsOwner.frameGenerationVerdictFor(fps) }
     function frameGenerationModes() { return settingsOwner.frameGenerationModes }
     function selectFrameGenerationMode(mode) { settingsOwner.selectFrameGenerationMode(mode) }

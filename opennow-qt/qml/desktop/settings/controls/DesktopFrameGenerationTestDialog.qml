@@ -123,6 +123,24 @@ Dialog {
 
     contentItem: ColumnLayout {
         spacing: DesktopTokens.px(12)
+        Rectangle {
+            objectName: "frameGenerationDialogNotice"
+            Layout.fillWidth: true
+            implicitHeight: noticeText.implicitHeight + DesktopTokens.px(16)
+            radius: DesktopTokens.px(10)
+            color: Qt.rgba(0.96, 0.65, 0.14, 0.12)
+            border.color: Qt.rgba(0.96, 0.65, 0.14, 0.45)
+            Text {
+                id: noticeText
+                anchors.fill: parent; anchors.margins: DesktopTokens.px(8)
+                text: ShellStore.frameGenerationEngineNotice()
+                color: "#F5A623"
+                font.family: Theme.bodyFont
+                font.pixelSize: DesktopTokens.captionSize
+                font.weight: Font.DemiBold
+                wrapMode: Text.WordWrap
+            }
+        }
         Hint {
             objectName: "frameGenerationDialogStatus"
             Layout.fillWidth: true; text: root.statusText()

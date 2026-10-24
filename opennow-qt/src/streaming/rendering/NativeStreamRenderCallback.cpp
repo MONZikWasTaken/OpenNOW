@@ -13,8 +13,11 @@
 #include <rhi/qrhi.h>
 #include <rhi/qrhi_platform.h>
 #include <QDebug>
+#include <QImage>
 
 #include <utility>
+#include <vector>
+#include <memory>
 #include <atomic>
 #include <chrono>
 
@@ -350,6 +353,43 @@ public:
         m_needsFrame.store(true);
         m_outputKind = 2;
         m_frameGenerationStatus.store(FrameGenerationState::Active);
+        captureFrameGeneration(commandBuffer, generated);
+    }
+
+    // Diagnostics: with OPENNOW_FG_CAPTURE_DIR set, saves the pair and every generated frame
+    // as PNG 3 s after generation starts and then every 5 s, six times per session.
+    void captureFrameGeneration(QRhiCommandBuffer *commandBuffer, int generated)
+    {
+        static const QString directory = qEnvironmentVariable("OPENNOW_FG_CAPTURE_DIR");
+        if (directory.isEmpty() || m_captureCount >= 6 || !m_rhi) return;
+        const auto now = clockNs();
+        if (!m_captureDueNs) m_captureDueNs = now + 3'000'000'000;
+        if (now < m_captureDueNs) return;
+        m_captureDueNs = now + 5'000'000'000;
+        const int capture = ++m_captureCount;
+        m_captureResults.clear();
+        std::vector<std::pair<QString, QRhiTexture *>> frames{
+            {QStringLiteral("previous"), m_interpolator.previousTexture()},
+            {QStringLiteral("current"), m_interpolator.currentTexture()}};
+        for (int k = 1; k <= generated; ++k)
+            frames.emplace_back(QStringLiteral("generated-%1").arg(k), m_interpolator.generatedTexture(k));
+        auto *updates = m_rhi->nextResourceUpdateBatch();
+        for (const auto &[name, texture] : frames) {
+            if (!texture || texture->format() != QRhiTexture::RGBA8) continue;
+            auto result = std::make_unique<QRhiReadbackResult>();
+            const QString path = QStringLiteral("%1/capture-%2-%3.png").arg(directory).arg(capture).arg(name);
+            auto *raw = result.get();
+            raw->completed = [raw, path] {
+                QImage(reinterpret_cast<const uchar *>(raw->data.constData()), raw->pixelSize.width(),
+                       raw->pixelSize.height(), QImage::Format_RGBA8888).copy().save(path);
+            };
+            updates->readBackTexture(QRhiReadbackDescription(texture), raw);
+            m_captureResults.push_back(std::move(result));
+        }
+        commandBuffer->resourceUpdate(updates);
+        if (m_runtime)
+            m_runtime->logRenderDiagnostic(QStringLiteral("frame-generation capture=%1 frames=%2 factor=%3")
+                .arg(capture).arg(frames.size()).arg(m_pacer.factor()));
     }
 
     void setUpscalingTarget(const QSize &size) override
@@ -571,6 +611,9 @@ private:
     int m_frameGenerationFactor = 0;
     std::atomic_int m_reportedFactor = 0;
     std::atomic_int m_effectiveFactor = 0;
+    std::vector<std::unique_ptr<QRhiReadbackResult>> m_captureResults;
+    std::int64_t m_captureDueNs = 0;
+    int m_captureCount = 0;
     FrameGenerationState m_loggedStatus = FrameGenerationState::Off;
     std::int64_t m_lastStatusLogNs = 0;
     int m_suppressedStatusChanges = 0;
