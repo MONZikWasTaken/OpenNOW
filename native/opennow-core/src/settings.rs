@@ -3221,7 +3221,9 @@ mod tests {
             json!(239)
         );
         assert_eq!(
-            store.set("frameGenerationDisplayHz", json!("fast")).unwrap(),
+            store
+                .set("frameGenerationDisplayHz", json!("fast"))
+                .unwrap(),
             json!(0)
         );
         // Mode: off by default; a saved level without a mode means multiplier mode.
@@ -3302,9 +3304,14 @@ mod tests {
         let stored = store
             .set(FRAME_GENERATION_PROFILES, Value::Object(many))
             .unwrap();
-        assert_eq!(stored.as_object().unwrap().len(), MAXIMUM_FRAME_GENERATION_PROFILES);
         assert_eq!(
-            store.set(FRAME_GENERATION_PROFILES, json!("invalid")).unwrap(),
+            stored.as_object().unwrap().len(),
+            MAXIMUM_FRAME_GENERATION_PROFILES
+        );
+        assert_eq!(
+            store
+                .set(FRAME_GENERATION_PROFILES, json!("invalid"))
+                .unwrap(),
             json!({})
         );
         let _ = fs::remove_dir_all(directory);
